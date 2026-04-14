@@ -31,6 +31,11 @@ else:
 
 st.set_page_config(page_title="Market Dashboard", layout="wide")
 
+# DEBUG: show secrets keys (remove after confirming)
+if _use_dropbox:
+    st.sidebar.caption(f"Secrets keys: {list(st.secrets.keys())}")
+    st.sidebar.caption(f"Env ANTHROPIC: {'SET' if os.environ.get('ANTHROPIC_API_KEY') else 'NOT SET'}")
+
 # --- Portrait mode: constrain content to left half ---
 st.markdown("""
 <style>
