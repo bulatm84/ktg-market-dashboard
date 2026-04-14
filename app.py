@@ -5,15 +5,13 @@ from plotly.subplots import make_subplots
 from pathlib import Path
 import os
 
-# Load API key: check for secrets.toml (Streamlit Cloud), then .env (local dev)
-_secrets_paths = [
-    Path.home() / ".streamlit" / "secrets.toml",
-    Path(__file__).parent / ".streamlit" / "secrets.toml",
-]
-if any(p.exists() for p in _secrets_paths):
+# Load API key: check Streamlit secrets first (Cloud or local secrets.toml), then .env
+try:
     if "ANTHROPIC_API_KEY" in st.secrets:
         os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
-else:
+except Exception:
+    pass
+if "ANTHROPIC_API_KEY" not in os.environ:
     try:
         from dotenv import load_dotenv
         load_dotenv(Path(__file__).parent / ".env", override=True)
