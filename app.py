@@ -286,6 +286,11 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
+# One-time cache clear after deployment to flush any stale error responses
+if "cache_cleared_v1" not in st.session_state:
+    st.cache_data.clear()
+    st.session_state["cache_cleared_v1"] = True
+
 
 # --- Shared chart layout ---
 CHART_MARGIN = dict(t=40, b=50, l=60, r=20)
@@ -442,6 +447,7 @@ def get_ai_curated_headlines(headlines_json: str, signals_json: str) -> str:
         try:
             api_key = st.secrets["ANTHROPIC_API_KEY"]
         except (KeyError, AttributeError):
+            st.cache_data.clear()
             return "**API key not configured.** Set ANTHROPIC_API_KEY in secrets or .env file."
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
