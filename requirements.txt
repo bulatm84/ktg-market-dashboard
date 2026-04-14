@@ -1,5 +1,8 @@
 streamlit
-pandas
 plotly
+pandas
+anthropic
+python-dotenv
 dropbox
 pyarrow
+numpy
