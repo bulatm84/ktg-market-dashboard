@@ -7,8 +7,9 @@ import os
 
 # Load API key: check Streamlit secrets first (Cloud or local secrets.toml), then .env
 try:
-    if "ANTHROPIC_API_KEY" in st.secrets:
-        os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
+    _api_key = st.secrets.get("ANTHROPIC_API_KEY", None)
+    if _api_key:
+        os.environ["ANTHROPIC_API_KEY"] = _api_key
 except Exception:
     pass
 if "ANTHROPIC_API_KEY" not in os.environ:
@@ -310,9 +311,12 @@ def get_ai_strategy_recommendations(signals_json: str, regime_summary: str = "")
     if cached:
         return cached
     import anthropic
-    api_key = os.environ.get("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        return "**API key not configured.** Set ANTHROPIC_API_KEY in secrets or .env file."
+        try:
+            api_key = st.secrets["ANTHROPIC_API_KEY"]
+        except (KeyError, AttributeError):
+            return "**API key not configured.** Set ANTHROPIC_API_KEY in secrets or .env file."
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
@@ -433,9 +437,12 @@ def fetch_rss_headlines():
 def get_ai_curated_headlines(headlines_json: str, signals_json: str) -> str:
     """Use Claude to filter headlines for regime-relevant macro/geopolitical events."""
     import anthropic
-    api_key = os.environ.get("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        return "**API key not configured.** Set ANTHROPIC_API_KEY in secrets or .env file."
+        try:
+            api_key = st.secrets["ANTHROPIC_API_KEY"]
+        except (KeyError, AttributeError):
+            return "**API key not configured.** Set ANTHROPIC_API_KEY in secrets or .env file."
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
@@ -477,9 +484,12 @@ def get_ai_regime_summary(signals_json: str, headlines_json: str = "[]") -> str:
     if cached:
         return cached
     import anthropic
-    api_key = os.environ.get("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        return "**API key not configured.** Set ANTHROPIC_API_KEY in secrets or .env file."
+        try:
+            api_key = st.secrets["ANTHROPIC_API_KEY"]
+        except (KeyError, AttributeError):
+            return "**API key not configured.** Set ANTHROPIC_API_KEY in secrets or .env file."
     client = anthropic.Anthropic(api_key=api_key)
 
     headlines_section = ""
