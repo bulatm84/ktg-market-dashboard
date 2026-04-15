@@ -258,27 +258,30 @@ def disk_cache_set(prefix: str, result: str, *args):
 
 
 def check_scheduled_cache_clear():
-    """Clear API cache at 8:45 AM ET on weekdays so next load gets fresh AI analysis."""
-    from datetime import datetime, date, timezone, timedelta
-    now = datetime.now(timezone(timedelta(hours=-4)))  # US Eastern
+    """Clear ALL caches at 8:45 AM ET on weekdays so data + AI analysis refresh."""
+    from datetime import datetime, timezone, timedelta
+    eastern = timezone(timedelta(hours=-4))
+    now = datetime.now(eastern)
+    today_et = now.date().isoformat()
     # Only on weekdays (Mon=0 to Fri=4)
     if now.weekday() > 4:
         return
-    marker_file = CACHE_DIR / f"cleared_{date.today().isoformat()}.marker"
+    marker_file = CACHE_DIR / f"cleared_{today_et}.marker"
     # Already cleared today
     if marker_file.exists():
         return
-    # Not yet 8:45 AM
+    # Not yet 8:45 AM ET
     if now.hour < 8 or (now.hour == 8 and now.minute < 45):
         return
-    # Clear all cached regime + strategy + headline files
+    # Clear all cached AI results (disk cache)
     for f in CACHE_DIR.glob("regime_*.txt"):
         f.unlink()
     for f in CACHE_DIR.glob("strategies_*.txt"):
         f.unlink()
     for f in CACHE_DIR.glob("headlines_*.txt"):
         f.unlink()
-    # Also clear Streamlit's in-memory cache so data reloads
+    # Clear ALL Streamlit in-memory caches (Dropbox data + everything else)
+    # This forces fresh downloads from Dropbox on next page load
     st.cache_data.clear()
     # Write marker so we don't clear again today
     marker_file.write_text(now.strftime("%H:%M:%S"))
@@ -289,6 +292,15 @@ def check_scheduled_cache_clear():
 
 # Run on every page load
 check_scheduled_cache_clear()
+
+# v2: one-time forced cache clear to pick up latest data (remove after deploy)
+if "cache_cleared_v2" not in st.session_state:
+    for _f in CACHE_DIR.glob("*.txt"):
+        _f.unlink()
+    for _f in CACHE_DIR.glob("*.marker"):
+        _f.unlink()
+    st.cache_data.clear()
+    st.session_state["cache_cleared_v2"] = True
 
 
 
