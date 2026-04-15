@@ -293,14 +293,6 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# v2: one-time forced cache clear to pick up latest data (remove after deploy)
-if "cache_cleared_v2" not in st.session_state:
-    for _f in CACHE_DIR.glob("*.txt"):
-        _f.unlink()
-    for _f in CACHE_DIR.glob("*.marker"):
-        _f.unlink()
-    st.cache_data.clear()
-    st.session_state["cache_cleared_v2"] = True
 
 
 
