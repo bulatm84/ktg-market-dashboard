@@ -269,10 +269,12 @@ def check_scheduled_cache_clear():
     # Not yet 8:45 AM
     if now.hour < 8 or (now.hour == 8 and now.minute < 45):
         return
-    # Clear all cached regime + strategy files
+    # Clear all cached regime + strategy + headline files
     for f in CACHE_DIR.glob("regime_*.txt"):
         f.unlink()
     for f in CACHE_DIR.glob("strategies_*.txt"):
+        f.unlink()
+    for f in CACHE_DIR.glob("headlines_*.txt"):
         f.unlink()
     # Also clear Streamlit's in-memory cache so data reloads
     st.cache_data.clear()
@@ -286,10 +288,6 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# One-time cache clear after deployment to flush any stale error responses
-if "cache_cleared_v1" not in st.session_state:
-    st.cache_data.clear()
-    st.session_state["cache_cleared_v1"] = True
 
 
 # --- Shared chart layout ---
@@ -438,16 +436,17 @@ def fetch_rss_headlines():
     return headlines
 
 
-@st.cache_data(ttl=1800)  # re-curate headlines every 30 minutes
 def get_ai_curated_headlines(headlines_json: str, signals_json: str) -> str:
-    """Use Claude to filter headlines for regime-relevant macro/geopolitical events."""
+    """Use Claude to filter headlines for regime-relevant macro/geopolitical events. Disk-cached."""
+    cached = disk_cache_get("headlines", headlines_json)
+    if cached:
+        return cached
     import anthropic
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         try:
             api_key = st.secrets["ANTHROPIC_API_KEY"]
         except (KeyError, AttributeError):
-            st.cache_data.clear()
             return "**API key not configured.** Set ANTHROPIC_API_KEY in secrets or .env file."
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
@@ -479,7 +478,9 @@ Raw Headlines:
 {headlines_json}"""
         }]
     )
-    return message.content[0].text
+    result = message.content[0].text
+    disk_cache_set("headlines", result, headlines_json)
+    return result
 
 
 # --- AI Regime Summary ---
