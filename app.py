@@ -288,6 +288,13 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
+# One-time forced cache clear (remove after deploy)
+for _f in CACHE_DIR.glob("*.txt"):
+    _f.unlink()
+for _f in CACHE_DIR.glob("*.marker"):
+    _f.unlink()
+st.cache_data.clear()
+
 
 
 # --- Shared chart layout ---
