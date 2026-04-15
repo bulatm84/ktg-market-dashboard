@@ -236,12 +236,14 @@ def disk_cache_get(prefix: str, *args) -> str | None:
     return None
 
 def disk_cache_timestamp(prefix: str) -> str | None:
-    """Return the last modified time of the most recent cache file for a prefix."""
-    from datetime import datetime
+    """Return the last modified time of the most recent cache file for a prefix (in US Eastern)."""
+    from datetime import datetime, timezone, timedelta
     files = list(CACHE_DIR.glob(f"{prefix}_*.txt"))
     if files:
         mtime = max(f.stat().st_mtime for f in files)
-        return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %I:%M %p")
+        utc_dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+        eastern = utc_dt.astimezone(timezone(timedelta(hours=-4)))
+        return eastern.strftime("%Y-%m-%d %I:%M %p ET")
     return None
 
 def disk_cache_set(prefix: str, result: str, *args):
@@ -256,9 +258,9 @@ def disk_cache_set(prefix: str, result: str, *args):
 
 
 def check_scheduled_cache_clear():
-    """Clear API cache at 8:45 AM on weekdays so next load gets fresh AI analysis."""
-    from datetime import datetime, date
-    now = datetime.now()
+    """Clear API cache at 8:45 AM ET on weekdays so next load gets fresh AI analysis."""
+    from datetime import datetime, date, timezone, timedelta
+    now = datetime.now(timezone(timedelta(hours=-4)))  # US Eastern
     # Only on weekdays (Mon=0 to Fri=4)
     if now.weekday() > 4:
         return
