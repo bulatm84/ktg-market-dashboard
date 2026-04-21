@@ -246,6 +246,18 @@ def disk_cache_timestamp(prefix: str) -> str | None:
         return eastern.strftime("%Y-%m-%d %I:%M %p ET")
     return None
 
+def get_cache_date() -> str:
+    """Return date key based on 8:45am ET cutoff.
+    Before 8:45am ET uses yesterday's date; on/after 8:45am ET uses today's date.
+    Used to ensure AI calls happen at most once per trading day."""
+    from datetime import datetime, timezone, timedelta
+    eastern = timezone(timedelta(hours=-4))
+    now = datetime.now(eastern)
+    if now.hour < 8 or (now.hour == 8 and now.minute < 45):
+        return (now - timedelta(days=1)).date().isoformat()
+    return now.date().isoformat()
+
+
 def disk_cache_set(prefix: str, result: str, *args):
     """Save a result to disk cache."""
     key = hashlib.md5("".join(args).encode()).hexdigest()
@@ -315,8 +327,8 @@ def stamp_last_date(fig, last_date):
 
 # --- Actionable Strategies ---
 def get_ai_strategy_recommendations(signals_json: str, regime_summary: str = "") -> str:
-    """Call Claude API to generate actionable strategy recommendations aligned with regime summary. Disk-cached."""
-    cache_key = signals_json + regime_summary
+    """Call Claude API to generate actionable strategy recommendations. Disk-cached by date (once per day at 8:45am ET)."""
+    cache_key = get_cache_date()
     cached = disk_cache_get("strategies", cache_key)
     if cached:
         return cached
@@ -444,8 +456,9 @@ def fetch_rss_headlines():
 
 
 def get_ai_curated_headlines(headlines_json: str, signals_json: str) -> str:
-    """Use Claude to filter headlines for regime-relevant macro/geopolitical events. Disk-cached."""
-    cached = disk_cache_get("headlines", headlines_json)
+    """Use Claude to filter headlines. Disk-cached by date (once per day at 8:45am ET)."""
+    cache_key = get_cache_date()
+    cached = disk_cache_get("headlines", cache_key)
     if cached:
         return cached
     import anthropic
@@ -486,15 +499,15 @@ Raw Headlines:
         }]
     )
     result = message.content[0].text
-    disk_cache_set("headlines", result, headlines_json)
+    disk_cache_set("headlines", result, cache_key)
     return result
 
 
 # --- AI Regime Summary ---
 def get_ai_regime_summary(signals_json: str, headlines_json: str = "[]") -> str:
-    """Call Claude API to generate a cross-market regime interpretation. Disk-cached by signals (not headlines)."""
-    # Cache keyed on signals only — headlines change frequently but shouldn't trigger re-analysis
-    cached = disk_cache_get("regime", signals_json)
+    """Call Claude API to generate a cross-market regime interpretation. Disk-cached by date (once per day at 8:45am ET)."""
+    cache_key = get_cache_date()
+    cached = disk_cache_get("regime", cache_key)
     if cached:
         return cached
     import anthropic
@@ -538,7 +551,7 @@ Keep it concise (4-5 paragraphs). Use **bold** for key terms. Be direct and acti
         }]
     )
     result = message.content[0].text
-    disk_cache_set("regime", result, signals_json)
+    disk_cache_set("regime", result, cache_key)
     return result
 
 
