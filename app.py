@@ -726,6 +726,11 @@ if page == "Market Overview":
             s["EMA_8_20"] = safe_round(sp["SPY_EMA_8_20_var"], 4)
             s["EMA_20_200"] = safe_round(sp["SPY_EMA_20_200_var"], 4)
             s["CMF"] = safe_round(sp["SPY_Daily_CMF"], 3)
+            s["RealVol_20d"] = safe_round(sp.get("SPY_realized_vol_20d"), 2)
+            # Realized vol / VIX ratio
+            v_row = vix_by_date.get(d)
+            if v_row is not None and sp.get("SPY_realized_vol_20d") and v_row["VIX_Close"]:
+                s["RealVol_VIX_ratio"] = safe_round(sp["SPY_realized_vol_20d"] / v_row["VIX_Close"], 3)
         # SP500 EMA breadth for this date
         ema_row = ema_breadth_df[ema_breadth_df["date"].dt.strftime("%Y-%m-%d") == d]
         if not ema_row.empty:
