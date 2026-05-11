@@ -1159,6 +1159,51 @@ elif page == "VIX":
     stamp_last_date(fig4, df["Date"].max())
     st.plotly_chart(fig4, use_container_width=True)
 
+    # Chart 5: Realized Vol / VIX Ratio
+    st.subheader("SPY 20d Realized Vol / VIX (Realized vs Implied)")
+    spy_df = load_spy()
+    # Merge VIX and SPY on date (VIX uses 'Date', SPY uses 'date')
+    merged = pd.merge(
+        filtered[["Date", "VIX_Close"]],
+        spy_df[["date", "SPY_realized_vol_20d"]],
+        left_on="Date", right_on="date", how="inner",
+    ).dropna(subset=["SPY_realized_vol_20d", "VIX_Close"])
+    if not merged.empty:
+        # VIX is annualized implied vol in percentage points; realized vol may be decimal — normalise
+        rvol = merged["SPY_realized_vol_20d"]
+        vix = merged["VIX_Close"]
+        # If realized vol is stored as a decimal (e.g. 0.15 for 15%), scale to match VIX (percentage points)
+        if rvol.median() < 1:
+            rvol = rvol * 100
+        merged["RV_VIX_ratio"] = rvol / vix
+
+        fig5 = go.Figure()
+        fig5.add_trace(go.Scatter(
+            x=merged["Date"], y=merged["RV_VIX_ratio"],
+            name="RealVol20d / VIX", line=dict(color="#e377c2", width=1.3),
+            fill="tozeroy", fillcolor="rgba(227,119,194,0.08)",
+        ))
+        fig5.add_hline(y=1.0, line_dash="dash", line_color="black", line_width=1,
+                       annotation_text="1.0 (fair value)", annotation_position="bottom right")
+        fig5.add_hline(y=0.8, line_dash="dot", line_color="green", line_width=0.7,
+                       annotation_text="0.8 (vol overpriced)", annotation_position="bottom right")
+        fig5.add_hline(y=1.2, line_dash="dot", line_color="red", line_width=0.7,
+                       annotation_text="1.2 (vol underpriced)", annotation_position="bottom right")
+        fig5.update_layout(height=350, xaxis_title="Date",
+                           yaxis_title="Realized / Implied Ratio",
+                           hovermode="x unified", margin=CHART_MARGIN)
+        stamp_last_date(fig5, df["Date"].max())
+        st.plotly_chart(fig5, use_container_width=True)
+
+        st.caption(
+            "**Interpretation:** Ratio < 1 means implied vol (VIX) exceeds realized vol → options are "
+            "relatively expensive (variance risk premium is positive). Ratio > 1 means realized vol exceeds "
+            "implied → options are cheap relative to actual moves. Persistent readings below 0.8 suggest "
+            "overpriced hedging; above 1.2 suggests underpriced risk."
+        )
+    else:
+        st.warning("Realized vol data not available for the selected date range.")
+
 
 # =====================================================================
 # PUT/CALL RATIO PAGE
