@@ -305,6 +305,14 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
+# --- One-time cache buster v2 (remove after COR1M confirmed) ---
+if "cache_cleared_v2" not in st.session_state:
+    for _f in CACHE_DIR.glob("*.txt"):
+        _f.unlink()
+    for _f in CACHE_DIR.glob("*.marker"):
+        _f.unlink()
+    st.cache_data.clear()
+    st.session_state["cache_cleared_v2"] = True
 
 
 
@@ -686,6 +694,12 @@ if page == "Market Overview":
             s["VIX_z20"] = safe_round(v["VIX_z_score_20"], 2)
             s["VIX_60d_ratio"] = safe_round(v["VIX_60d_ratio"], 3)
             s["VIX_pct_chg"] = safe_round(v["VIX_Pct_Chg"], 4)
+            cor1m = v.get("COR1M")
+            if pd.notna(cor1m):
+                s["COR1M"] = safe_round(cor1m, 2)
+                s["COR1M_z10"] = safe_round(v.get("COR1M_z_score_10"), 2)
+                s["COR1M_z20"] = safe_round(v.get("COR1M_z_score_20"), 2)
+                s["COR1M_VIX_ratio"] = safe_round(v.get("COR1M_VIX_ratio"), 3)
         p = pcr_by_date.get(d)
         if p is not None:
             s["PCR"] = safe_round(p["PCR"], 3)
@@ -1213,6 +1227,106 @@ elif page == "VIX":
         )
     else:
         st.warning("Realized vol data not available for the selected date range.")
+
+    # =================================================================
+    # COR1M (Implied Correlation) Section
+    # =================================================================
+    has_cor1m = "COR1M" in filtered.columns and filtered["COR1M"].notna().any()
+    if has_cor1m:
+        st.divider()
+        st.header("Implied Correlation (COR1M)")
+
+        # Key metrics row
+        cor_latest = filtered.dropna(subset=["COR1M"]).iloc[-1] if filtered["COR1M"].notna().any() else None
+        if cor_latest is not None:
+            cor_now = cor_latest["COR1M"]
+            ccols = st.columns(5)
+            ccols[0].metric("COR1M", f"{cor_now:.2f}")
+            ccols[1].metric("10d Z-Score", f"{cor_latest['COR1M_z_score_10']:.2f}" if pd.notna(cor_latest.get("COR1M_z_score_10")) else "N/A")
+            ccols[2].metric("20d Z-Score", f"{cor_latest['COR1M_z_score_20']:.2f}" if pd.notna(cor_latest.get("COR1M_z_score_20")) else "N/A")
+            ccols[3].metric("60d Ratio", f"{cor_latest['COR1M_60d_ratio']:.3f}" if pd.notna(cor_latest.get("COR1M_60d_ratio")) else "N/A")
+            ccols[4].metric("COR1M / VIX", f"{cor_latest['COR1M_VIX_ratio']:.3f}" if pd.notna(cor_latest.get("COR1M_VIX_ratio")) else "N/A")
+
+        # Chart 6: COR1M Level & MAs
+        st.subheader("COR1M Level & Moving Averages")
+        fig6 = go.Figure()
+        fig6.add_trace(go.Scatter(
+            x=filtered["Date"], y=filtered["COR1M"],
+            name="COR1M", line=dict(color="#1f77b4", width=1.5),
+        ))
+        if "COR1M_MA_10" in filtered.columns:
+            fig6.add_trace(go.Scatter(
+                x=filtered["Date"], y=filtered["COR1M_MA_10"],
+                name="MA 10", line=dict(color="#ff7f0e", width=1, dash="dot"),
+            ))
+        if "COR1M_MA_20" in filtered.columns:
+            fig6.add_trace(go.Scatter(
+                x=filtered["Date"], y=filtered["COR1M_MA_20"],
+                name="MA 20", line=dict(color="#2ca02c", width=1, dash="dot"),
+            ))
+        if "COR1M_MA_60" in filtered.columns:
+            fig6.add_trace(go.Scatter(
+                x=filtered["Date"], y=filtered["COR1M_MA_60"],
+                name="MA 60", line=dict(color="#d62728", width=1, dash="dash"),
+            ))
+        fig6.update_layout(height=400, xaxis_title="Date", yaxis_title="COR1M Index",
+                           hovermode="x unified", margin=CHART_MARGIN)
+        stamp_last_date(fig6, df["Date"].max())
+        st.plotly_chart(fig6, use_container_width=True)
+
+        # Chart 7: COR1M Z-Scores
+        st.subheader("COR1M Z-Scores (10d & 20d)")
+        fig7 = go.Figure()
+        if "COR1M_z_score_10" in filtered.columns:
+            fig7.add_trace(go.Scatter(x=filtered["Date"], y=filtered["COR1M_z_score_10"],
+                                      name="Z-Score 10d", line=dict(color="#1f77b4", width=1.2)))
+        if "COR1M_z_score_20" in filtered.columns:
+            fig7.add_trace(go.Scatter(x=filtered["Date"], y=filtered["COR1M_z_score_20"],
+                                      name="Z-Score 20d", line=dict(color="#ff7f0e", width=1.2)))
+        for level in [-2, -1, 1, 2]:
+            fig7.add_hline(y=level, line_dash="dash", line_color="gray", line_width=0.5,
+                           annotation_text=f"{level:+d}", annotation_position="bottom right")
+        fig7.add_hline(y=0, line_color="black", line_width=0.5)
+        fig7.update_layout(height=350, xaxis_title="Date", yaxis_title="Z-Score",
+                           hovermode="x unified", margin=CHART_MARGIN)
+        stamp_last_date(fig7, df["Date"].max())
+        st.plotly_chart(fig7, use_container_width=True)
+
+        # Chart 8: COR1M / VIX Ratio
+        st.subheader("COR1M / VIX Ratio")
+        if "COR1M_VIX_ratio" in filtered.columns:
+            fig8 = go.Figure()
+            fig8.add_trace(go.Scatter(
+                x=filtered["Date"], y=filtered["COR1M_VIX_ratio"],
+                name="COR1M / VIX", line=dict(color="#17becf", width=1.3),
+                fill="tozeroy", fillcolor="rgba(23,190,207,0.08)",
+            ))
+            fig8.add_hline(y=filtered["COR1M_VIX_ratio"].median(), line_dash="dash",
+                           line_color="orange", line_width=1,
+                           annotation_text=f"Median ({filtered['COR1M_VIX_ratio'].median():.2f})",
+                           annotation_position="bottom right")
+            fig8.update_layout(height=350, xaxis_title="Date",
+                               yaxis_title="COR1M / VIX Ratio",
+                               hovermode="x unified", margin=CHART_MARGIN)
+            stamp_last_date(fig8, df["Date"].max())
+            st.plotly_chart(fig8, use_container_width=True)
+
+        # Interpretation footnote
+        st.caption(
+            "**About COR1M (CBOE 1-Month Implied Correlation Index):** "
+            "Measures the market's expectation of how correlated S&P 500 stocks will move over the next month. "
+            "**High COR1M (>50)** → stocks expected to move together (macro/systemic risk dominates, "
+            "dispersion trades are cheap, diversification is less effective). "
+            "**Low COR1M (<20)** → stock-specific moves dominate (good for stock-pickers, "
+            "dispersion is expensive, index hedges are less efficient).\n\n"
+            "**Z-Scores:** Values above +2 signal a sharp spike in correlation expectations (panic/macro shock); "
+            "below -2 signals unusually low correlation (complacency or strong stock-picker market).\n\n"
+            "**COR1M / VIX Ratio:** Measures whether correlation is high *relative* to overall fear. "
+            "A rising ratio means correlation is climbing faster than VIX — systematic/contagion risk is increasing "
+            "even if VIX looks contained. A falling ratio means VIX is driven more by idiosyncratic moves than "
+            "broad market fear. Extreme highs suggest crowded macro positioning; extreme lows suggest a "
+            "dispersion-friendly environment."
+        )
 
 
 # =====================================================================
