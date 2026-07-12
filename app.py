@@ -415,7 +415,7 @@ Use **bold** for key terms. Be specific and actionable — this is for an experi
 {signals_json}"""
         }]
     )
-    result = message.content[0].text
+    result = next(b.text for b in message.content if b.type == "text")
     disk_cache_set("strategies", result, cache_key)
     return result
 
@@ -506,7 +506,7 @@ Raw Headlines:
 {headlines_json}"""
         }]
     )
-    result = message.content[0].text
+    result = next(b.text for b in message.content if b.type == "text")
     disk_cache_set("headlines", result, cache_key)
     return result
 
@@ -558,7 +558,7 @@ Keep it concise (4-5 paragraphs). Use **bold** for key terms. Be direct and acti
 {signals_json}{headlines_section}"""
         }]
     )
-    result = message.content[0].text
+    result = next(b.text for b in message.content if b.type == "text")
     disk_cache_set("regime", result, cache_key)
     return result
 
