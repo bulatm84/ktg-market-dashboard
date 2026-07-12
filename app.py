@@ -305,14 +305,14 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v2 (remove after COR1M confirmed) ---
-if "cache_cleared_v2" not in st.session_state:
+# --- One-time cache buster v3 (clear stale model-404 errors) ---
+if "cache_cleared_v3" not in st.session_state:
     for _f in CACHE_DIR.glob("*.txt"):
         _f.unlink()
     for _f in CACHE_DIR.glob("*.marker"):
         _f.unlink()
     st.cache_data.clear()
-    st.session_state["cache_cleared_v2"] = True
+    st.session_state["cache_cleared_v3"] = True
 
 
 
@@ -349,7 +349,7 @@ def get_ai_strategy_recommendations(signals_json: str, regime_summary: str = "")
             return "**API key not configured.** Set ANTHROPIC_API_KEY in secrets or .env file."
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-5",
         max_tokens=2000,
         messages=[{
             "role": "user",
@@ -478,7 +478,7 @@ def get_ai_curated_headlines(headlines_json: str, signals_json: str) -> str:
             return "**API key not configured.** Set ANTHROPIC_API_KEY in secrets or .env file."
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-5",
         max_tokens=1500,
         messages=[{
             "role": "user",
@@ -539,7 +539,7 @@ Recent Headlines:
 {headlines_json}"""
 
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-5",
         max_tokens=1500,
         messages=[{
             "role": "user",
