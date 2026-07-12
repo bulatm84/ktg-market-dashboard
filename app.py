@@ -350,6 +350,7 @@ def get_ai_strategy_recommendations(signals_json: str, regime_summary: str = "")
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
         model="claude-sonnet-5",
+        thinking={"type": "disabled"},
         max_tokens=2000,
         messages=[{
             "role": "user",
@@ -479,6 +480,7 @@ def get_ai_curated_headlines(headlines_json: str, signals_json: str) -> str:
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
         model="claude-sonnet-5",
+        thinking={"type": "disabled"},
         max_tokens=1500,
         messages=[{
             "role": "user",
@@ -540,6 +542,7 @@ Recent Headlines:
 
     message = client.messages.create(
         model="claude-sonnet-5",
+        thinking={"type": "disabled"},
         max_tokens=1500,
         messages=[{
             "role": "user",
