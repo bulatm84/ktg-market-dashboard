@@ -305,8 +305,8 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v3 (clear stale model-404 errors) ---
-if "cache_cleared_v3" not in st.session_state:
+# --- One-time cache buster v4 (refresh for trading style regime) ---
+if "cache_cleared_v4" not in st.session_state:
     for _f in CACHE_DIR.glob("*.txt"):
         _f.unlink()
     for _f in CACHE_DIR.glob("*.marker"):
@@ -362,6 +362,27 @@ REGIME SUMMARY (already shown to user — align with this):
 {regime_summary}
 
 Structure your response EXACTLY as follows:
+
+## TRADING STYLE REGIME
+
+Classify the current environment as one of:
+
+**SWING TRADING REGIME** — conditions favor multi-day holds. Criteria:
+- A large percentage of stocks are closing above their R1 pivot levels (R1_close > ~0.25) consistently over the trailing window
+- The broader market is trending in the same direction (EMA_8_20 and EMA_20_200 both positive or both negative, RSI confirming)
+- Intraday reversals are NOT dominant (R1 failure rate is moderate/low)
+- Breadth is expanding (pct_above_EMA20 and pct_above_EMA50 rising)
+
+**DAY TRADING REGIME** — conditions favor intraday strategies only. Criteria:
+- Intraday moves are large (OR_range elevated, intra_return_total volatile, VWAP_dev large)
+- But overnight/multi-day holds are risky because the market is NOT trending (conflicting EMA signals, high R1/S1 failure rates, breadth choppy)
+- Elevated VIX with positive gamma (dealers capping moves) creates large intraday ranges that mean-revert
+
+**NEUTRAL / NO CLEAR EDGE** — neither style has a strong edge. Low volatility, tight ranges, no clear trend or intraday opportunity. Reduce size and wait for clearer signals.
+
+State which regime applies, explain WHY with specific signal references from the trailing window, and note what would cause a SHIFT to a different regime. Bold the regime classification.
+
+---
 
 ## STOCK STRATEGIES
 
