@@ -401,7 +401,7 @@ Explain WHY this regime is favored with specific signal references. Include entr
 Consider the INTERACTION between these factors:
 1. **IV Environment**: VIX level and z-scores tell you if options are cheap or expensive
 2. **Directional Bias**: OFI, breadth, EMA structure tell you the likely direction
-3. **Gamma Environment**: Positive gamma = mean-reversion (sell premium), negative gamma = momentum (buy premium for directional)
+3. **Gamma Environment**: Positive gamma = mean-reversion (sell premium), negative gamma = momentum (buy premium for directional). Check GEX_flip — if gamma just flipped sign, the prior day's strategy may be obsolete.
 4. **Breakout/Breakdown Quality**: Pivot breadth failure rates tell you if directional moves stick
 
 Based on the interaction, recommend specific options structures:
@@ -576,6 +576,15 @@ Analyze both the CURRENT state and the TRAJECTORY over the past 5 days. Specific
 3. **Trajectory & momentum** — Are conditions improving, deteriorating, or stable? Highlight any signals that are trending in a clear direction. Connect moves to macro catalysts where applicable.
 4. **Divergences & risks** — Any indicators moving in opposite directions? Any headline risks not yet reflected in the quantitative data?
 
+GEX DAY-OVER-DAY FIELDS — pay special attention to these:
+- **GEX_flip**: "FLIPPED_POSITIVE" or "FLIPPED_NEGATIVE" means Net GEX crossed zero from the prior day — this is a MAJOR regime shift. A flip to positive means dealers shifted from amplifying to suppressing volatility; a flip to negative means the opposite.
+- **Net_GEX_norm_chg / Net_GEX_B_chg**: Day-over-day change in GEX. Large moves signal rapid repositioning by options dealers.
+- **Gamma_Tilt_chg**: Shift in call/put gamma balance. Rising tilt = increasing call-side hedging (ceiling effect), falling tilt = increasing put-side hedging (acceleration risk).
+- **Flip_Dist_pct_chg**: Change in distance to the gamma flip level. Shrinking distance = approaching a regime change.
+- **Net_Sign / Spot_vs_Flip**: Current gamma regime and whether SPX is above/below the flip level.
+
+When GEX_flip appears, lead with it — it changes everything about strategy recommendations.
+
 Keep it concise (4-5 paragraphs). Use **bold** for key terms. Be direct and actionable. When discussing shifts, reference specific day-over-day changes and connect to catalysts.
 
 5-Day Trailing Market Signals (oldest → newest):
@@ -690,7 +699,7 @@ if page == "Market Overview":
     ty_rows = get_last_n(ty_df, "Date", LOOKBACK)
     piv_rows = get_last_n(pivot_df, "date", LOOKBACK)
     ofi_rows = get_last_n(ofi_df, "date", LOOKBACK)
-    gex_rows = get_last_n(gex_df, "Date", LOOKBACK)
+    gex_rows = get_last_n(gex_df, "Date", LOOKBACK + 1)
     spy_rows = get_last_n(spy_df, "date", LOOKBACK)
 
     all_dates = sorted(set(
@@ -708,9 +717,13 @@ if page == "Market Overview":
     gex_by_date = {d: r for d, r in gex_rows}
     spy_by_date = {d: r for d, r in spy_rows}
 
+    gex_dates_sorted = sorted(gex_by_date.keys())
+    gex_prev_map = {gex_dates_sorted[i]: gex_dates_sorted[i - 1] for i in range(1, len(gex_dates_sorted))}
+
     trailing = OrderedDict()
     for d in all_dates:
         s = {}
+        prev_date = gex_prev_map.get(d)
         v = vix_by_date.get(d)
         if v is not None:
             s["VIX"] = safe_round(v["VIX_Close"], 2)
@@ -760,6 +773,30 @@ if page == "Market Overview":
             s["Flip_Dist_pct"] = safe_round(g.get("Flip_Dist_pct"), 2)
             s["Call_Wall"] = safe_round(g.get("Call_Wall"), 0)
             s["Put_Wall"] = safe_round(g.get("Put_Wall"), 0)
+            s["Net_Sign"] = g.get("Net_Sign", "")
+            s["Spot_vs_Flip"] = g.get("Spot_vs_Flip", "")
+            prev_g = gex_by_date.get(prev_date)
+            if prev_g is not None:
+                pg_norm = prev_g.get("Net_GEX_norm")
+                cg_norm = g.get("Net_GEX_norm")
+                if pd.notna(pg_norm) and pd.notna(cg_norm):
+                    s["Net_GEX_norm_chg"] = safe_round(cg_norm - pg_norm, 2)
+                    if (pg_norm <= 0 and cg_norm > 0):
+                        s["GEX_flip"] = "FLIPPED_POSITIVE"
+                    elif (pg_norm >= 0 and cg_norm < 0):
+                        s["GEX_flip"] = "FLIPPED_NEGATIVE"
+                pg_b = prev_g.get("Net_GEX_B")
+                cg_b = g.get("Net_GEX_B")
+                if pd.notna(pg_b) and pd.notna(cg_b):
+                    s["Net_GEX_B_chg"] = safe_round(cg_b - pg_b, 2)
+                pg_tilt = prev_g.get("Gamma_Tilt")
+                cg_tilt = g.get("Gamma_Tilt")
+                if pd.notna(pg_tilt) and pd.notna(cg_tilt):
+                    s["Gamma_Tilt_chg"] = safe_round(cg_tilt - pg_tilt, 4)
+                pg_flip = prev_g.get("Flip_Dist_pct")
+                cg_flip = g.get("Flip_Dist_pct")
+                if pd.notna(pg_flip) and pd.notna(cg_flip):
+                    s["Flip_Dist_pct_chg"] = safe_round(cg_flip - pg_flip, 2)
         sp = spy_by_date.get(d)
         if sp is not None:
             s["SPY_close"] = safe_round(sp["close"], 2)
