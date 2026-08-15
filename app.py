@@ -2325,6 +2325,47 @@ elif page == "Gamma (GEX)":
         stamp_last_date(fig_g4, df["Date"].max())
         st.plotly_chart(fig_g4, use_container_width=True)
 
+    # Chart 5: Day-over-Day Call Wall & Put Wall Changes
+    if len(filtered) >= 2:
+        has_walls = "Call_Wall" in filtered.columns and "Put_Wall" in filtered.columns
+        if has_walls:
+            st.subheader("Call Wall & Put Wall — Day-over-Day Change")
+            wall_df = filtered[["Date", "Call_Wall", "Put_Wall"]].dropna(subset=["Call_Wall", "Put_Wall"]).copy()
+            if len(wall_df) >= 2:
+                wall_df["Call_Wall_chg"] = wall_df["Call_Wall"].diff()
+                wall_df["Put_Wall_chg"] = wall_df["Put_Wall"].diff()
+                wall_df = wall_df.iloc[1:]
+
+                fig_g5 = go.Figure()
+                fig_g5.add_trace(go.Bar(
+                    x=wall_df["Date"], y=wall_df["Call_Wall_chg"],
+                    name="Call Wall Δ",
+                    marker_color="rgba(44,160,44,0.7)",
+                ))
+                fig_g5.add_trace(go.Bar(
+                    x=wall_df["Date"], y=wall_df["Put_Wall_chg"],
+                    name="Put Wall Δ",
+                    marker_color="rgba(214,39,40,0.7)",
+                ))
+                fig_g5.add_hline(y=0, line_color="black", line_width=0.5)
+                fig_g5.update_layout(
+                    height=350, xaxis_title="Date",
+                    yaxis_title="Change (SPX points)",
+                    barmode="group",
+                    hovermode="x unified", margin=CHART_MARGIN,
+                )
+                stamp_last_date(fig_g5, df["Date"].max())
+                st.plotly_chart(fig_g5, use_container_width=True)
+
+                st.caption(
+                    "**Interpretation:** Call wall rising = dealers adding upside hedges (resistance moving higher, bullish repositioning). "
+                    "Put wall rising = downside protection moving up (support tightening). "
+                    "Call wall falling = upside hedges unwinding (resistance weakening). "
+                    "Put wall falling = downside protection dropping (support weakening, bearish repositioning). "
+                    "When both walls move in the same direction, dealers are shifting the entire gamma structure — "
+                    "follow the direction. When they diverge (call wall up, put wall down), the range is widening and a large move is expected."
+                )
+
 
 # =====================================================================
 # SPY TECHNICALS PAGE
