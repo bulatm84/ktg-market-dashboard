@@ -108,7 +108,7 @@ def load_ofi():
 
 @st.cache_data
 def load_gex():
-    df = _dbx_read_csv("SPY_historical_gamma_2005_2025.csv", parse_dates=["Date"]) if _use_dropbox else pd.read_csv(DATA_DIR / "SPY_historical_gamma_2005_2025.csv", parse_dates=["Date"])
+    df = _dbx_read_csv("SPX_historical_gamma.csv", parse_dates=["Date"]) if _use_dropbox else pd.read_csv(DATA_DIR / "SPX_historical_gamma.csv", parse_dates=["Date"])
     df.sort_values("Date", inplace=True)
     return df.reset_index(drop=True)
 
@@ -305,14 +305,14 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v4 (refresh for trading style regime) ---
-if "cache_cleared_v4" not in st.session_state:
+# --- One-time cache buster v5 (refresh for SPX GEX switch) ---
+if "cache_cleared_v5" not in st.session_state:
     for _f in CACHE_DIR.glob("*.txt"):
         _f.unlink()
     for _f in CACHE_DIR.glob("*.marker"):
         _f.unlink()
     st.cache_data.clear()
-    st.session_state["cache_cleared_v3"] = True
+    st.session_state["cache_cleared_v5"] = True
 
 
 
@@ -666,7 +666,7 @@ if page == "Market Overview":
     mcols = st.columns(8)
     mcols[0].metric("VIX", f"{vix_latest['VIX_Close']:.1f}")
     mcols[1].metric("PCR", f"{pcr_latest['PCR']:.2f}")
-    mcols[2].metric("Gamma", f"{gex_latest['Agg_Gamma_norm']:+.4f}" if pd.notna(gex_latest['Agg_Gamma_norm']) else "N/A")
+    mcols[2].metric("GEX", f"${gex_latest['Net_GEX_B']:.1f}B" if pd.notna(gex_latest.get('Net_GEX_B')) else "N/A")
     mcols[3].metric("R1 Fail", f"{pivot_latest['pct_failed_RR1']:.0%}" if pd.notna(pivot_latest['pct_failed_RR1']) else "N/A")
     mcols[4].metric("OFI", f"{ofi_latest['day_ofi_ratio']:+.4f}")
     mcols[5].metric("Adv %", f"{ad_latest['Advance_pct']:.0%}" if pd.notna(ad_latest['Advance_pct']) else "N/A")
@@ -754,9 +754,12 @@ if page == "Market Overview":
             s["OR_range"] = safe_round(o.get("or_range"), 2)
         g = gex_by_date.get(d)
         if g is not None:
-            s["Agg_Gamma"] = safe_round(g["Agg_Gamma_norm"], 4)
-            s["Spot_Gamma"] = safe_round(g["Spot_Gamma_norm"], 4)
-            s["Hedge_Wall"] = safe_round(g["Hedge_wall_1"], 0)
+            s["Net_GEX_norm"] = safe_round(g.get("Net_GEX_norm"), 2)
+            s["Net_GEX_B"] = safe_round(g.get("Net_GEX_B"), 2)
+            s["Gamma_Tilt"] = safe_round(g.get("Gamma_Tilt"), 4)
+            s["Flip_Dist_pct"] = safe_round(g.get("Flip_Dist_pct"), 2)
+            s["Call_Wall"] = safe_round(g.get("Call_Wall"), 0)
+            s["Put_Wall"] = safe_round(g.get("Put_Wall"), 0)
         sp = spy_by_date.get(d)
         if sp is not None:
             s["SPY_close"] = safe_round(sp["close"], 2)
@@ -2132,7 +2135,7 @@ elif page == "Order Flow":
 # GAMMA (GEX) PAGE
 # =====================================================================
 elif page == "Gamma (GEX)":
-    st.title("SPY Gamma Exposure (GEX)")
+    st.title("SPX Gamma Exposure (GEX)")
     df = load_gex()
     filtered = date_filter(df, "Date")
     st.caption(f"Last data: **{df['Date'].max().strftime('%Y-%m-%d')}**")
@@ -2140,142 +2143,150 @@ elif page == "Gamma (GEX)":
     # Key Metrics
     if not filtered.empty:
         latest = filtered.iloc[-1]
-        agg_gamma = latest["Agg_Gamma_norm"]
-        spot_gamma = latest["Spot_Gamma_norm"]
-        hedge_wall = latest["Hedge_wall_1"]
-        spy_close = latest["SPY_prev_close"]
+        net_gex = latest.get("Net_GEX_B")
+        net_gex_norm = latest.get("Net_GEX_norm")
+        gamma_tilt = latest.get("Gamma_Tilt")
+        flip_level = latest.get("Flip")
+        flip_dist = latest.get("Flip_Dist_pct")
+        spot = latest.get("Spot")
+        call_wall = latest.get("Call_Wall")
+        put_wall = latest.get("Put_Wall")
+        net_sign = latest.get("Net_Sign", "")
 
-        if pd.notna(agg_gamma):
-            if agg_gamma > 0.002:
+        if pd.notna(net_gex_norm):
+            if net_gex_norm > 500:
                 gamma_env = "Strong +Gamma"
-            elif agg_gamma > 0:
+            elif net_gex_norm > 0:
                 gamma_env = "Positive Gamma"
-            elif agg_gamma > -0.002:
+            elif net_gex_norm > -500:
                 gamma_env = "Negative Gamma"
             else:
                 gamma_env = "Deep -Gamma"
         else:
             gamma_env = "N/A"
 
-        cols = st.columns(5)
-        cols[0].metric("Agg Gamma", f"{agg_gamma:+.4f}" if pd.notna(agg_gamma) else "N/A")
+        cols = st.columns(6)
+        cols[0].metric("Net GEX", f"${net_gex:.1f}B" if pd.notna(net_gex) else "N/A")
         cols[1].metric("Environment", gamma_env)
-        cols[2].metric("Spot Gamma", f"{spot_gamma:+.4f}" if pd.notna(spot_gamma) else "N/A")
-        cols[3].metric("Hedge Wall", f"${hedge_wall:.0f}" if pd.notna(hedge_wall) else "N/A")
-        cols[4].metric("SPY Close", f"${spy_close:.2f}" if pd.notna(spy_close) else "N/A")
+        cols[2].metric("Gamma Tilt", f"{gamma_tilt:.3f}" if pd.notna(gamma_tilt) else "N/A")
+        cols[3].metric("Flip Level", f"{flip_level:,.0f}" if pd.notna(flip_level) else "N/A")
+        cols[4].metric("Call Wall", f"{call_wall:,.0f}" if pd.notna(call_wall) else "N/A")
+        cols[5].metric("Put Wall", f"{put_wall:,.0f}" if pd.notna(put_wall) else "N/A")
 
         lines = ["**Gamma Regime Interpretation**\n"]
 
-        if pd.notna(agg_gamma):
-            if agg_gamma > 0.002:
-                lines.append(f"Aggregate gamma at **{agg_gamma:+.4f}** is **strongly positive**. Dealers are long gamma and will hedge by selling rallies and buying dips -- this **suppresses volatility** and pins price action near the hedge wall. Expect low realized vol, tight ranges, and mean-reversion setups. Breakouts are unlikely to sustain.")
-            elif agg_gamma > 0:
-                lines.append(f"Aggregate gamma at **{agg_gamma:+.4f}** is **modestly positive**. Dealers are still net long gamma, providing a stabilizing force, but not overwhelmingly so. Volatility is contained but directional moves are possible with strong enough catalysts.")
-            elif agg_gamma > -0.002:
-                lines.append(f"Aggregate gamma at **{agg_gamma:+.4f}** is **negative**. Dealers are short gamma and must hedge in the same direction as the move -- buying into rallies and selling into declines. This **amplifies volatility** and creates momentum-friendly conditions. Breakouts are more likely to follow through.")
+        if pd.notna(net_gex_norm):
+            if net_gex_norm > 500:
+                lines.append(f"Net GEX at **${net_gex:.1f}B** (norm {net_gex_norm:+.0f}) is **strongly positive**. Dealers are long gamma and will hedge by selling rallies and buying dips -- this **suppresses volatility** and pins price action near the call wall. Expect low realized vol, tight ranges, and mean-reversion setups. Breakouts are unlikely to sustain.")
+            elif net_gex_norm > 0:
+                lines.append(f"Net GEX at **${net_gex:.1f}B** (norm {net_gex_norm:+.0f}) is **modestly positive**. Dealers are still net long gamma, providing a stabilizing force, but not overwhelmingly so. Volatility is contained but directional moves are possible with strong enough catalysts.")
+            elif net_gex_norm > -500:
+                lines.append(f"Net GEX at **${net_gex:.1f}B** (norm {net_gex_norm:+.0f}) is **negative**. Dealers are short gamma and must hedge in the same direction as the move -- buying into rallies and selling into declines. This **amplifies volatility** and creates momentum-friendly conditions. Breakouts are more likely to follow through.")
             else:
-                lines.append(f"Aggregate gamma at **{agg_gamma:+.4f}** is **deeply negative**. Dealers are heavily short gamma, creating a **volatility accelerator**. Moves in either direction will be amplified by dealer hedging flows. This is the most dangerous regime for mean-reversion and the most favorable for trend-following. Expect outsized moves and potential gap risk.")
+                lines.append(f"Net GEX at **${net_gex:.1f}B** (norm {net_gex_norm:+.0f}) is **deeply negative**. Dealers are heavily short gamma, creating a **volatility accelerator**. Moves in either direction will be amplified by dealer hedging flows. This is the most dangerous regime for mean-reversion and the most favorable for trend-following. Expect outsized moves and potential gap risk.")
 
-        if pd.notna(hedge_wall) and pd.notna(spy_close):
-            wall_dist = ((hedge_wall - spy_close) / spy_close) * 100
-            if abs(wall_dist) < 0.5:
-                lines.append(f"SPY (${spy_close:.0f}) is **at the hedge wall** (${hedge_wall:.0f}). This level acts as a magnet -- dealer hedging flows concentrate here, making it a strong support/resistance level. Price tends to gravitate toward the wall in positive gamma environments.")
-            elif wall_dist > 0:
-                lines.append(f"Hedge wall at **${hedge_wall:.0f}** is {wall_dist:.1f}% above SPY (${spy_close:.0f}). The wall acts as overhead resistance where dealer gamma is most concentrated. In positive gamma, expect price to be drawn toward this level.")
-            else:
-                lines.append(f"Hedge wall at **${hedge_wall:.0f}** is {abs(wall_dist):.1f}% below SPY (${spy_close:.0f}). Price has broken above the wall, which may reduce the stabilizing effect of dealer hedging. If gamma flips negative, this can accelerate moves away from the wall.")
+        if pd.notna(gamma_tilt):
+            if gamma_tilt > 1.2:
+                lines.append(f"Gamma tilt at **{gamma_tilt:.2f}** is call-heavy -- upside gamma dominates. Dealer hedging creates a ceiling effect, limiting rallies but cushioning dips.")
+            elif gamma_tilt < 0.8:
+                lines.append(f"Gamma tilt at **{gamma_tilt:.2f}** is put-heavy -- downside gamma dominates. Dealer hedging accelerates selloffs but provides a floor on rallies.")
+
+        if pd.notna(flip_level) and pd.notna(spot):
+            if pd.notna(flip_dist):
+                if flip_dist > 0:
+                    lines.append(f"Gamma flip at **{flip_level:,.0f}** is {abs(flip_dist):.1f}% above SPX ({spot:,.0f}). A rally to the flip level would shift dealers from short to long gamma, dampening further upside momentum.")
+                else:
+                    lines.append(f"SPX ({spot:,.0f}) is **{abs(flip_dist):.1f}% above the gamma flip** ({flip_level:,.0f}). Price is in the positive-gamma regime -- dealers stabilize moves. A drop below {flip_level:,.0f} would flip to negative gamma and amplify the selloff.")
+
+        if pd.notna(call_wall) and pd.notna(put_wall) and pd.notna(spot):
+            lines.append(f"Dealer gamma is concentrated between the **put wall ({put_wall:,.0f})** and **call wall ({call_wall:,.0f})**. These act as support and resistance where hedging flows are strongest.")
 
         st.info("\n\n".join(lines))
 
-    # Chart 1: Call Gamma vs Put Gamma
-    st.subheader("Call vs Put Gamma")
-    fig_g1 = go.Figure()
-    fig_g1.add_trace(go.Scatter(
-        x=filtered["Date"], y=filtered["Call_gamma_1"],
-        name="Call Gamma", line=dict(color="#2ca02c", width=1.2),
-        fill="tozeroy", fillcolor="rgba(44,160,44,0.1)",
-    ))
-    fig_g1.add_trace(go.Scatter(
-        x=filtered["Date"], y=filtered["Put_gamma_1"],
-        name="Put Gamma", line=dict(color="#d62728", width=1.2),
-        fill="tozeroy", fillcolor="rgba(214,39,40,0.1)",
-    ))
-    fig_g1.add_hline(y=0, line_color="black", line_width=0.5)
-    fig_g1.update_layout(height=400, xaxis_title="Date", yaxis_title="Gamma",
-                         hovermode="x unified", margin=CHART_MARGIN)
-    stamp_last_date(fig_g1, df["Date"].max())
-    st.plotly_chart(fig_g1, use_container_width=True)
+        key_strikes = latest.get("Key_Strikes")
+        if pd.notna(key_strikes) and key_strikes:
+            st.caption(f"**Key Strikes:** {key_strikes}")
 
-    # Chart 2: Normalized Aggregate Gamma (positive/negative gamma environment)
-    st.subheader("Aggregate Gamma (Normalized)")
-    fig_g2 = go.Figure()
-    colors_gamma = [
-        "rgba(76,175,80,0.7)" if v > 0 else "rgba(183,28,28,0.7)"
-        for v in filtered["Agg_Gamma_norm"].fillna(0)
-    ]
-    fig_g2.add_trace(go.Bar(
-        x=filtered["Date"], y=filtered["Agg_Gamma_norm"],
-        marker_color=colors_gamma, name="Agg Gamma Norm",
-    ))
-    fig_g2.add_hline(y=0, line_color="black", line_width=1,
-                     annotation_text="Gamma Flip", annotation_position="bottom right")
-    fig_g2.update_layout(height=400, xaxis_title="Date", yaxis_title="Normalized Gamma",
-                         hovermode="x unified", margin=CHART_MARGIN)
-    stamp_last_date(fig_g2, df["Date"].max())
-    st.plotly_chart(fig_g2, use_container_width=True)
+    # Chart 1: Net GEX (Normalized)
+    st.subheader("Net GEX (Normalized)")
+    if "Net_GEX_norm" in filtered.columns:
+        fig_g1 = go.Figure()
+        colors_gamma = [
+            "rgba(76,175,80,0.7)" if v > 0 else "rgba(183,28,28,0.7)"
+            for v in filtered["Net_GEX_norm"].fillna(0)
+        ]
+        fig_g1.add_trace(go.Bar(
+            x=filtered["Date"], y=filtered["Net_GEX_norm"],
+            marker_color=colors_gamma, name="Net GEX Norm",
+        ))
+        fig_g1.add_hline(y=0, line_color="black", line_width=1,
+                         annotation_text="Gamma Flip", annotation_position="bottom right")
+        fig_g1.update_layout(height=400, xaxis_title="Date", yaxis_title="Normalized GEX",
+                             hovermode="x unified", margin=CHART_MARGIN)
+        stamp_last_date(fig_g1, df["Date"].max())
+        st.plotly_chart(fig_g1, use_container_width=True)
 
-    # Chart 3: Spot Gamma (Normalized)
-    st.subheader("Spot Gamma at Current Price (Normalized)")
-    fig_g3 = go.Figure()
-    colors_spot = [
-        "rgba(76,175,80,0.6)" if v > 0 else "rgba(183,28,28,0.6)"
-        for v in filtered["Spot_Gamma_norm"].fillna(0)
-    ]
-    fig_g3.add_trace(go.Bar(
-        x=filtered["Date"], y=filtered["Spot_Gamma_norm"],
-        marker_color=colors_spot, name="Spot Gamma Norm",
-    ))
-    fig_g3.add_hline(y=0, line_color="black", line_width=0.5)
-    fig_g3.update_layout(height=350, xaxis_title="Date", yaxis_title="Spot Gamma (Norm)",
-                         hovermode="x unified", margin=CHART_MARGIN)
-    stamp_last_date(fig_g3, df["Date"].max())
-    st.plotly_chart(fig_g3, use_container_width=True)
+    # Chart 2: Net GEX ($B)
+    st.subheader("Net GEX ($ Billions)")
+    if "Net_GEX_B" in filtered.columns:
+        fig_g2 = go.Figure()
+        colors_gex_b = [
+            "rgba(76,175,80,0.7)" if v > 0 else "rgba(183,28,28,0.7)"
+            for v in filtered["Net_GEX_B"].fillna(0)
+        ]
+        fig_g2.add_trace(go.Bar(
+            x=filtered["Date"], y=filtered["Net_GEX_B"],
+            marker_color=colors_gex_b, name="Net GEX ($B)",
+        ))
+        fig_g2.add_hline(y=0, line_color="black", line_width=0.5)
+        fig_g2.update_layout(height=350, xaxis_title="Date", yaxis_title="Net GEX ($B)",
+                             hovermode="x unified", margin=CHART_MARGIN)
+        stamp_last_date(fig_g2, df["Date"].max())
+        st.plotly_chart(fig_g2, use_container_width=True)
 
-    # Chart 4: Hedge Wall vs SPY Price
-    st.subheader("Hedge Wall vs SPY Price")
-    fig_g4 = make_subplots(specs=[[{"secondary_y": True}]])
-    fig_g4.add_trace(go.Scatter(
-        x=filtered["Date"], y=filtered["SPY_prev_close"],
-        name="SPY Close", line=dict(color="#1f77b4", width=1.5),
-    ), secondary_y=False)
-    fig_g4.add_trace(go.Scatter(
-        x=filtered["Date"], y=filtered["Hedge_wall_1"],
-        name="Hedge Wall", line=dict(color="#ff7f0e", width=1.5, dash="dot"),
-    ), secondary_y=False)
-    # Shade the gap between them
-    fig_g4.add_trace(go.Scatter(
-        x=filtered["Date"], y=filtered["SPY_prev_close"],
-        line=dict(width=0), showlegend=False,
-    ), secondary_y=False)
-    fig_g4.add_trace(go.Scatter(
-        x=filtered["Date"], y=filtered["Hedge_wall_1"],
-        line=dict(width=0), fill="tonexty",
-        fillcolor="rgba(255,127,14,0.08)", showlegend=False,
-    ), secondary_y=False)
-    # Overlay Agg Gamma on secondary axis for context
-    fig_g4.add_trace(go.Bar(
-        x=filtered["Date"], y=filtered["Agg_Gamma_norm"],
-        name="Agg Gamma", marker_color=[
-            "rgba(76,175,80,0.3)" if v > 0 else "rgba(183,28,28,0.3)"
-            for v in filtered["Agg_Gamma_norm"].fillna(0)
-        ],
-    ), secondary_y=True)
-    fig_g4.update_yaxes(title_text="Price ($)", secondary_y=False)
-    fig_g4.update_yaxes(title_text="Agg Gamma", secondary_y=True)
-    fig_g4.update_layout(height=450, xaxis_title="Date",
-                         hovermode="x unified", margin=CHART_MARGIN)
-    stamp_last_date(fig_g4, df["Date"].max())
-    st.plotly_chart(fig_g4, use_container_width=True)
+    # Chart 3: Gamma Tilt
+    st.subheader("Gamma Tilt (Call/Put Balance)")
+    if "Gamma_Tilt" in filtered.columns:
+        fig_g3 = go.Figure()
+        fig_g3.add_trace(go.Scatter(
+            x=filtered["Date"], y=filtered["Gamma_Tilt"],
+            name="Gamma Tilt", line=dict(color="#9467bd", width=1.3),
+            fill="tozeroy", fillcolor="rgba(148,103,189,0.08)",
+        ))
+        fig_g3.add_hline(y=1.0, line_dash="dash", line_color="black", line_width=1,
+                         annotation_text="1.0 (balanced)", annotation_position="bottom right")
+        fig_g3.update_layout(height=350, xaxis_title="Date", yaxis_title="Tilt (>1 = call-heavy)",
+                             hovermode="x unified", margin=CHART_MARGIN)
+        stamp_last_date(fig_g3, df["Date"].max())
+        st.plotly_chart(fig_g3, use_container_width=True)
+
+    # Chart 4: SPX Spot vs Call Wall / Put Wall / Flip
+    st.subheader("SPX vs Key Gamma Levels")
+    if "Spot" in filtered.columns:
+        fig_g4 = go.Figure()
+        fig_g4.add_trace(go.Scatter(
+            x=filtered["Date"], y=filtered["Spot"],
+            name="SPX Spot", line=dict(color="#1f77b4", width=1.5),
+        ))
+        if "Call_Wall" in filtered.columns:
+            fig_g4.add_trace(go.Scatter(
+                x=filtered["Date"], y=filtered["Call_Wall"],
+                name="Call Wall", line=dict(color="#2ca02c", width=1.2, dash="dot"),
+            ))
+        if "Put_Wall" in filtered.columns:
+            fig_g4.add_trace(go.Scatter(
+                x=filtered["Date"], y=filtered["Put_Wall"],
+                name="Put Wall", line=dict(color="#d62728", width=1.2, dash="dot"),
+            ))
+        if "Flip" in filtered.columns:
+            fig_g4.add_trace(go.Scatter(
+                x=filtered["Date"], y=filtered["Flip"],
+                name="Gamma Flip", line=dict(color="#ff7f0e", width=1.2, dash="dash"),
+            ))
+        fig_g4.update_layout(height=450, xaxis_title="Date", yaxis_title="SPX Level",
+                             hovermode="x unified", margin=CHART_MARGIN)
+        stamp_last_date(fig_g4, df["Date"].max())
+        st.plotly_chart(fig_g4, use_container_width=True)
 
 
 # =====================================================================
