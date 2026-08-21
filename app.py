@@ -2514,19 +2514,35 @@ elif page == "Stock GEX":
 
         st.dataframe(styled, use_container_width=True, height=min(40 * len(tbl) + 38, 600))
 
-        # Breakout risk warnings
+        # Breakout risk warnings — split by gamma sign
         high_bo = today_df[today_df["Breakout_Risk_Score"] >= 30].sort_values("Breakout_Risk_Score", ascending=False)
         if not high_bo.empty:
-            warns = []
-            for _, r in high_bo.iterrows():
-                warns.append(
-                    f"**{r['Symbol']}** — call wall at **${r['Call_Wall']:,.0f}** "
-                    f"({r['Call_Wall_Dist_pct']:+.1f}% from spot ${r['Spot']:.2f}), "
-                    f"breakout risk score **{r['Breakout_Risk_Score']:.0f}**/100"
-                )
-            st.warning("**Breakout Risk Alerts** — these stocks are near their call wall in positive gamma. "
-                       "Breakouts above the call wall are likely to fail as dealer hedging creates resistance.\n\n" +
-                       "\n\n".join(warns))
+            pos_bo = high_bo[high_bo["Near_Sign"] == "POSITIVE"]
+            neg_bo = high_bo[high_bo["Near_Sign"] == "NEGATIVE"]
+
+            if not pos_bo.empty:
+                warns = []
+                for _, r in pos_bo.iterrows():
+                    warns.append(
+                        f"**{r['Symbol']}** — call wall at **${r['Call_Wall']:,.0f}** "
+                        f"({r['Call_Wall_Dist_pct']:+.1f}% from spot ${r['Spot']:.2f}), "
+                        f"BO score **{r['Breakout_Risk_Score']:.0f}**/100"
+                    )
+                st.warning("**Breakout Risk — Positive Gamma (fade the breakout)** — "
+                           "dealers are long gamma and will sell into rallies near the call wall. "
+                           "Breakouts likely to fail and reverse.\n\n" + "\n\n".join(warns))
+
+            if not neg_bo.empty:
+                warns = []
+                for _, r in neg_bo.iterrows():
+                    warns.append(
+                        f"**{r['Symbol']}** — call wall at **${r['Call_Wall']:,.0f}** "
+                        f"({r['Call_Wall_Dist_pct']:+.1f}% from spot ${r['Spot']:.2f}), "
+                        f"BO score **{r['Breakout_Risk_Score']:.0f}**/100"
+                    )
+                st.info("**Breakout Watch — Negative Gamma (breakout accelerates)** — "
+                        "dealers are short gamma and will buy into rallies near the call wall. "
+                        "A break above the wall could trigger a gamma squeeze.\n\n" + "\n\n".join(warns))
 
     st.divider()
 
