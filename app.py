@@ -114,6 +114,13 @@ def load_gex():
 
 
 @st.cache_data
+def load_stock_gex():
+    df = _dbx_read_csv("Historical_stock_GEX.csv", parse_dates=["Date"]) if _use_dropbox else pd.read_csv(DATA_DIR / "Historical_stock_GEX.csv", parse_dates=["Date"])
+    df.sort_values(["Symbol", "Date"], inplace=True)
+    return df.reset_index(drop=True)
+
+
+@st.cache_data
 def load_spy():
     df = _dbx_read_csv("SPY_historical_data.csv", parse_dates=["date"]) if _use_dropbox else pd.read_csv(DATA_DIR / "SPY_historical_data.csv", parse_dates=["date"])
     df.sort_values("date", inplace=True)
@@ -305,14 +312,14 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v5 (refresh for SPX GEX switch) ---
-if "cache_cleared_v5" not in st.session_state:
+# --- One-time cache buster v6 (refresh for stock GEX tab) ---
+if "cache_cleared_v6" not in st.session_state:
     for _f in CACHE_DIR.glob("*.txt"):
         _f.unlink()
     for _f in CACHE_DIR.glob("*.marker"):
         _f.unlink()
     st.cache_data.clear()
-    st.session_state["cache_cleared_v5"] = True
+    st.session_state["cache_cleared_v6"] = True
 
 
 
@@ -596,8 +603,61 @@ Keep it concise (4-5 paragraphs). Use **bold** for key terms. Be direct and acti
     return result
 
 
+# --- AI Stock GEX Analysis ---
+def get_ai_stock_gex_analysis(symbol: str, gex_json: str) -> str:
+    """Call Claude API to interpret a single stock's GEX data with day-over-day changes."""
+    cache_key = f"{get_cache_date()}_{symbol}"
+    cached = disk_cache_get("stock_gex", cache_key)
+    if cached:
+        return cached
+    import anthropic
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        try:
+            api_key = st.secrets["ANTHROPIC_API_KEY"]
+        except (KeyError, AttributeError):
+            return "**API key not configured.**"
+    client = anthropic.Anthropic(api_key=api_key)
+    message = client.messages.create(
+        model="claude-sonnet-5",
+        thinking={"type": "disabled"},
+        max_tokens=800,
+        messages=[{
+            "role": "user",
+            "content": f"""You are a senior options-aware equity trader. Analyze the GEX (gamma exposure) data for **{symbol}** and give specific, actionable trading guidance.
+
+DATA FIELDS:
+- **Near_Net_GEX_B**: Net gamma in billions. Positive = dealers long gamma (suppress moves). Negative = dealers short gamma (amplify moves).
+- **Near_Tilt**: Call/put gamma balance. >1 = call-heavy (ceiling), <1 = put-heavy (acceleration).
+- **Call_Wall / Call_Wall_Dist_pct**: Strongest resistance level from dealer hedging + distance from spot.
+- **Put_Wall / Put_Wall_Dist_pct**: Strongest support level + distance.
+- **Near_Flip / Near_Flip_Dist_pct**: Level where gamma flips sign + distance. Spot_vs_Flip shows which regime.
+- **Breakout_Risk / Breakout_Risk_Score**: True if spot is near call wall in positive gamma (breakout likely to fail). Score 0-100, higher = more dangerous breakout.
+- **ATR**: Average true range for position sizing context.
+- **Dominant_Exp / Dominant_DTE**: Where most gamma is concentrated (expiration date and days to go).
+- **Call_Wall_Share_pct / Put_Wall_Share_pct**: How concentrated gamma is at the wall strikes.
+- **_chg suffix**: Day-over-day change. **GEX_flip** = "FLIPPED_POSITIVE" or "FLIPPED_NEGATIVE" if gamma crossed zero.
+
+STRUCTURE YOUR RESPONSE AS:
+1. **Gamma Regime** (1 sentence): Is the stock in positive or negative gamma? What does that mean for price action today?
+2. **Key Levels** (2-3 sentences): Call wall as resistance, put wall as support, flip level. How far is price from each? Which level matters most right now?
+3. **Breakout/Breakdown Risk** (1-2 sentences): If someone is buying a breakout above the call wall — will it work or fail? If Breakout_Risk is True, warn explicitly. Same for breakdown below put wall.
+4. **Day-over-Day Shift** (1-2 sentences): What changed from yesterday? Did walls move? Did gamma flip? Is the structure getting more or less favorable?
+5. **Action** (1-2 sentences): Specific recommendation — buy/sell/wait, and at what levels. Reference the GEX levels.
+
+Be concise and direct. This is for an experienced trader who needs quick, actionable reads.
+
+{symbol} GEX Data (recent days, oldest → newest):
+{gex_json}"""
+        }]
+    )
+    result = next(b.text for b in message.content if b.type == "text")
+    disk_cache_set("stock_gex", result, cache_key)
+    return result
+
+
 # --- Page Navigation ---
-page = st.sidebar.radio("Dashboard", ["Market Overview", "Sectors & Commodities", "VIX", "Put/Call Ratio", "Advance/Decline", "Treasury Yields", "Pivot Breadth", "Order Flow", "Gamma (GEX)", "SPY Technicals"])
+page = st.sidebar.radio("Dashboard", ["Market Overview", "Sectors & Commodities", "VIX", "Put/Call Ratio", "Advance/Decline", "Treasury Yields", "Pivot Breadth", "Order Flow", "Gamma (GEX)", "Stock GEX", "SPY Technicals"])
 
 # --- Shared date filter helper ---
 def date_filter(df, date_col):
@@ -2365,6 +2425,268 @@ elif page == "Gamma (GEX)":
                     "When both walls move in the same direction, dealers are shifting the entire gamma structure — "
                     "follow the direction. When they diverge (call wall up, put wall down), the range is widening and a large move is expected."
                 )
+
+
+# =====================================================================
+# STOCK GEX PAGE
+# =====================================================================
+elif page == "Stock GEX":
+    st.title("Stock GEX — Individual Gamma Exposure")
+    sgex_df = load_stock_gex()
+    latest_date = sgex_df["Date"].max()
+    st.caption(f"Last data: **{latest_date.strftime('%Y-%m-%d')}**")
+
+    all_symbols = sorted(sgex_df["Symbol"].unique())
+
+    # --- Overview Table: latest day, all symbols ---
+    st.subheader("Today's GEX Summary")
+    today_df = sgex_df[sgex_df["Date"] == latest_date].copy()
+
+    if not today_df.empty:
+        display_cols = [
+            "Symbol", "Spot", "Near_Net_GEX_B", "Near_Sign", "Near_Tilt",
+            "Call_Wall", "Call_Wall_Dist_pct", "Put_Wall", "Put_Wall_Dist_pct",
+            "Near_Flip", "Near_Flip_Dist_pct", "Spot_vs_Flip",
+            "Breakout_Risk", "Breakout_Risk_Score",
+        ]
+        display_cols = [c for c in display_cols if c in today_df.columns]
+        tbl = today_df[display_cols].copy()
+        tbl = tbl.sort_values("Breakout_Risk_Score", ascending=False)
+
+        rename_map = {
+            "Near_Net_GEX_B": "Net GEX ($B)",
+            "Near_Sign": "Sign",
+            "Near_Tilt": "Tilt",
+            "Call_Wall": "Call Wall",
+            "Call_Wall_Dist_pct": "CW Dist%",
+            "Put_Wall": "Put Wall",
+            "Put_Wall_Dist_pct": "PW Dist%",
+            "Near_Flip": "Flip",
+            "Near_Flip_Dist_pct": "Flip Dist%",
+            "Spot_vs_Flip": "Regime",
+            "Breakout_Risk": "BO Risk",
+            "Breakout_Risk_Score": "BO Score",
+        }
+        tbl = tbl.rename(columns={k: v for k, v in rename_map.items() if k in tbl.columns})
+
+        def color_sign(val):
+            if val == "POSITIVE":
+                return "color: #2e7d32"
+            elif val == "NEGATIVE":
+                return "color: #c62828"
+            return ""
+
+        def color_bo_risk(val):
+            if val is True or val == "True":
+                return "background-color: rgba(198,40,40,0.15); color: #c62828; font-weight: bold"
+            return ""
+
+        def color_bo_score(val):
+            try:
+                v = float(val)
+            except (ValueError, TypeError):
+                return ""
+            if v >= 50:
+                return "background-color: rgba(198,40,40,0.15); color: #c62828; font-weight: bold"
+            elif v >= 20:
+                return "background-color: rgba(255,152,0,0.15); color: #e65100"
+            return ""
+
+        styled = tbl.style
+        if "Sign" in tbl.columns:
+            styled = styled.map(color_sign, subset=["Sign"])
+        if "BO Risk" in tbl.columns:
+            styled = styled.map(color_bo_risk, subset=["BO Risk"])
+        if "BO Score" in tbl.columns:
+            styled = styled.map(color_bo_score, subset=["BO Score"])
+        styled = styled.format({
+            "Spot": "${:.2f}",
+            "Net GEX ($B)": "{:+.3f}",
+            "Tilt": "{:.2f}",
+            "Call Wall": "${:,.0f}",
+            "CW Dist%": "{:+.2f}%",
+            "Put Wall": "${:,.0f}",
+            "PW Dist%": "{:.2f}%",
+            "Flip": "${:,.0f}",
+            "Flip Dist%": "{:+.2f}%",
+            "BO Score": "{:.1f}",
+        }, na_rep="—")
+
+        st.dataframe(styled, use_container_width=True, height=min(40 * len(tbl) + 38, 600))
+
+        # Breakout risk warnings
+        high_bo = today_df[today_df["Breakout_Risk_Score"] >= 30].sort_values("Breakout_Risk_Score", ascending=False)
+        if not high_bo.empty:
+            warns = []
+            for _, r in high_bo.iterrows():
+                warns.append(
+                    f"**{r['Symbol']}** — call wall at **${r['Call_Wall']:,.0f}** "
+                    f"({r['Call_Wall_Dist_pct']:+.1f}% from spot ${r['Spot']:.2f}), "
+                    f"breakout risk score **{r['Breakout_Risk_Score']:.0f}**/100"
+                )
+            st.warning("**Breakout Risk Alerts** — these stocks are near their call wall in positive gamma. "
+                       "Breakouts above the call wall are likely to fail as dealer hedging creates resistance.\n\n" +
+                       "\n\n".join(warns))
+
+    st.divider()
+
+    # --- Single Symbol Deep Dive ---
+    st.subheader("Symbol Deep Dive")
+    selected = st.selectbox("Select symbol", all_symbols,
+                            index=all_symbols.index("SPY") if "SPY" in all_symbols else 0)
+
+    sym_df = sgex_df[sgex_df["Symbol"] == selected].copy().sort_values("Date")
+
+    if sym_df.empty:
+        st.warning(f"No GEX data for {selected}.")
+    else:
+        sym_latest = sym_df.iloc[-1]
+
+        # Key metrics row
+        mc = st.columns(6)
+        mc[0].metric("Spot", f"${sym_latest['Spot']:.2f}")
+        mc[1].metric("Net GEX", f"${sym_latest['Near_Net_GEX_B']:+.3f}B" if pd.notna(sym_latest.get("Near_Net_GEX_B")) else "N/A")
+        mc[2].metric("Tilt", f"{sym_latest['Near_Tilt']:.2f}" if pd.notna(sym_latest.get("Near_Tilt")) else "N/A")
+        mc[3].metric("Call Wall", f"${sym_latest['Call_Wall']:,.0f}" if pd.notna(sym_latest.get("Call_Wall")) else "N/A")
+        mc[4].metric("Put Wall", f"${sym_latest['Put_Wall']:,.0f}" if pd.notna(sym_latest.get("Put_Wall")) else "N/A")
+        bo_score = sym_latest.get("Breakout_Risk_Score", 0)
+        mc[5].metric("BO Risk Score", f"{bo_score:.0f}" if pd.notna(bo_score) else "N/A")
+
+        # AI analysis
+        with st.expander("AI GEX Analysis", expanded=True):
+            ai_fields = [
+                "Date", "Spot", "Near_Net_GEX_B", "Near_Sign", "Near_Tilt",
+                "Near_Flip", "Near_Flip_Dist_pct", "Spot_vs_Flip",
+                "Call_Wall", "Call_Wall_Dist_pct", "Put_Wall", "Put_Wall_Dist_pct",
+                "ATR", "Breakout_Risk", "Breakout_Risk_Score",
+                "Call_Wall_Gamma_B", "Call_Wall_Share_pct",
+                "Put_Wall_Gamma_B", "Put_Wall_Share_pct",
+                "Dominant_Exp", "Dominant_DTE",
+            ]
+            ai_fields = [c for c in ai_fields if c in sym_df.columns]
+            ai_data = sym_df[ai_fields].tail(5).copy()
+            ai_data["Date"] = ai_data["Date"].dt.strftime("%Y-%m-%d")
+
+            # Add day-over-day deltas
+            for col in ["Near_Net_GEX_B", "Near_Tilt", "Near_Flip_Dist_pct"]:
+                if col in ai_data.columns:
+                    ai_data[f"{col}_chg"] = ai_data[col].diff()
+            if "Call_Wall" in ai_data.columns:
+                ai_data["Call_Wall_chg"] = ai_data["Call_Wall"].diff()
+            if "Put_Wall" in ai_data.columns:
+                ai_data["Put_Wall_chg"] = ai_data["Put_Wall"].diff()
+            if "Near_Net_GEX_B" in ai_data.columns:
+                vals = ai_data["Near_Net_GEX_B"].values
+                flips = []
+                for i in range(len(vals)):
+                    if i == 0 or pd.isna(vals[i]) or pd.isna(vals[i - 1]):
+                        flips.append(None)
+                    elif vals[i - 1] <= 0 and vals[i] > 0:
+                        flips.append("FLIPPED_POSITIVE")
+                    elif vals[i - 1] >= 0 and vals[i] < 0:
+                        flips.append("FLIPPED_NEGATIVE")
+                    else:
+                        flips.append(None)
+                ai_data["GEX_flip"] = flips
+
+            records = ai_data.where(ai_data.notna(), None).to_dict(orient="records")
+            gex_json = json.dumps(records, default=str)
+
+            try:
+                analysis = get_ai_stock_gex_analysis(selected, gex_json)
+                st.markdown(analysis)
+            except Exception as e:
+                st.error(f"AI analysis failed: {e}")
+
+        # Chart 1: Spot vs Call Wall / Put Wall / Flip
+        if len(sym_df) >= 2:
+            st.subheader(f"{selected} — Spot vs GEX Levels")
+            fig_s1 = go.Figure()
+            fig_s1.add_trace(go.Scatter(
+                x=sym_df["Date"], y=sym_df["Spot"],
+                name="Spot", line=dict(color="#1f77b4", width=1.5),
+            ))
+            if "Call_Wall" in sym_df.columns:
+                fig_s1.add_trace(go.Scatter(
+                    x=sym_df["Date"], y=sym_df["Call_Wall"],
+                    name="Call Wall", line=dict(color="#2ca02c", width=1.2, dash="dot"),
+                ))
+            if "Put_Wall" in sym_df.columns:
+                fig_s1.add_trace(go.Scatter(
+                    x=sym_df["Date"], y=sym_df["Put_Wall"],
+                    name="Put Wall", line=dict(color="#d62728", width=1.2, dash="dot"),
+                ))
+            if "Near_Flip" in sym_df.columns:
+                fig_s1.add_trace(go.Scatter(
+                    x=sym_df["Date"], y=sym_df["Near_Flip"],
+                    name="Gamma Flip", line=dict(color="#ff7f0e", width=1.2, dash="dash"),
+                ))
+            fig_s1.update_layout(height=400, xaxis_title="Date", yaxis_title="Price",
+                                 hovermode="x unified", margin=CHART_MARGIN)
+            stamp_last_date(fig_s1, sym_df["Date"].max())
+            st.plotly_chart(fig_s1, use_container_width=True)
+
+        # Chart 2: Call Wall / Put Wall day-over-day changes
+        if len(sym_df) >= 2 and "Call_Wall" in sym_df.columns and "Put_Wall" in sym_df.columns:
+            wall_chg = sym_df[["Date", "Call_Wall", "Put_Wall"]].dropna(subset=["Call_Wall", "Put_Wall"]).copy()
+            if len(wall_chg) >= 2:
+                wall_chg["Call_Wall_chg"] = wall_chg["Call_Wall"].diff()
+                wall_chg["Put_Wall_chg"] = wall_chg["Put_Wall"].diff()
+                wall_chg = wall_chg.iloc[1:]
+                st.subheader(f"{selected} — Wall Movement (Day-over-Day)")
+                fig_s2 = go.Figure()
+                fig_s2.add_trace(go.Bar(
+                    x=wall_chg["Date"], y=wall_chg["Call_Wall_chg"],
+                    name="Call Wall Δ", marker_color="rgba(44,160,44,0.7)",
+                ))
+                fig_s2.add_trace(go.Bar(
+                    x=wall_chg["Date"], y=wall_chg["Put_Wall_chg"],
+                    name="Put Wall Δ", marker_color="rgba(214,39,40,0.7)",
+                ))
+                fig_s2.add_hline(y=0, line_color="black", line_width=0.5)
+                fig_s2.update_layout(height=350, xaxis_title="Date", yaxis_title="Change ($)",
+                                     barmode="group", hovermode="x unified", margin=CHART_MARGIN)
+                stamp_last_date(fig_s2, sym_df["Date"].max())
+                st.plotly_chart(fig_s2, use_container_width=True)
+
+        # Chart 3: Breakout Risk Score over time
+        if len(sym_df) >= 2 and "Breakout_Risk_Score" in sym_df.columns:
+            bo_data = sym_df[["Date", "Breakout_Risk_Score"]].dropna()
+            if len(bo_data) >= 2:
+                st.subheader(f"{selected} — Breakout Risk Score")
+                fig_s3 = go.Figure()
+                colors_bo = [
+                    "rgba(198,40,40,0.7)" if v >= 50 else
+                    "rgba(255,152,0,0.7)" if v >= 20 else
+                    "rgba(76,175,80,0.7)"
+                    for v in bo_data["Breakout_Risk_Score"].fillna(0)
+                ]
+                fig_s3.add_trace(go.Bar(
+                    x=bo_data["Date"], y=bo_data["Breakout_Risk_Score"],
+                    marker_color=colors_bo, name="BO Risk Score",
+                ))
+                fig_s3.add_hline(y=50, line_dash="dash", line_color="red", line_width=1,
+                                 annotation_text="High risk", annotation_position="bottom right")
+                fig_s3.add_hline(y=20, line_dash="dash", line_color="orange", line_width=0.8,
+                                 annotation_text="Moderate", annotation_position="bottom right")
+                fig_s3.update_layout(height=300, xaxis_title="Date", yaxis_title="Score (0-100)",
+                                     hovermode="x unified", margin=CHART_MARGIN)
+                stamp_last_date(fig_s3, sym_df["Date"].max())
+                st.plotly_chart(fig_s3, use_container_width=True)
+
+        # Footnotes
+        st.caption(
+            "**How to use Stock GEX for trading:**\n\n"
+            "**Call Wall** = strongest resistance from dealer gamma hedging. "
+            "If spot approaches the call wall in **positive gamma**, dealers sell into the rally → breakout likely fails. "
+            "The higher the **Breakout Risk Score**, the more dangerous the breakout attempt.\n\n"
+            "**Put Wall** = strongest support. In positive gamma, dealers buy dips near the put wall → support holds.\n\n"
+            "**Gamma Flip** = the price where dealer gamma switches sign. "
+            "Above the flip: positive gamma (mean-reversion, ranges). Below: negative gamma (momentum, acceleration).\n\n"
+            "**Tilt** > 1 = call-heavy (upside capped). Tilt < 1 = put-heavy (downside risk amplified).\n\n"
+            "**Day-over-day wall changes**: Call wall moving up = dealers repositioning higher (bullish). "
+            "Put wall dropping = support weakening (bearish). Both moving same direction = follow the shift."
+        )
 
 
 # =====================================================================
