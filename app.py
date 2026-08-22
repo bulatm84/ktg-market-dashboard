@@ -973,7 +973,7 @@ if page == "Market Overview":
         with st.spinner("Generating regime analysis..."):
             try:
                 interpretation = get_ai_regime_summary(signals_json, regime_headlines_json)
-                st.markdown(interpretation)
+                st.markdown(interpretation.replace("$", r"\$"))
             except Exception as e:
                 interpretation = ""
                 st.error(f"Regime analysis failed: {e}")
@@ -988,7 +988,7 @@ if page == "Market Overview":
         with st.spinner("Generating strategy recommendations..."):
             try:
                 recommendations = get_ai_strategy_recommendations(signals_json, interpretation)
-                st.markdown(recommendations)
+                st.markdown(recommendations.replace("$", r"\$"))
             except Exception as e:
                 st.error(f"Strategy recommendations failed: {e}")
 
@@ -2638,7 +2638,7 @@ elif page == "Stock GEX":
 
             try:
                 analysis = get_ai_stock_gex_analysis(selected, gex_json)
-                st.markdown(analysis)
+                st.markdown(analysis.replace("$", r"\$"))
             except Exception as e:
                 st.error(f"AI analysis failed: {e}")
 
