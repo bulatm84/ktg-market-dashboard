@@ -312,14 +312,14 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v6 (refresh for stock GEX tab) ---
-if "cache_cleared_v6" not in st.session_state:
+# --- One-time cache buster v7 (refresh for stock GEX scoring v2) ---
+if "cache_cleared_v7" not in st.session_state:
     for _f in CACHE_DIR.glob("*.txt"):
         _f.unlink()
     for _f in CACHE_DIR.glob("*.marker"):
         _f.unlink()
     st.cache_data.clear()
-    st.session_state["cache_cleared_v6"] = True
+    st.session_state["cache_cleared_v7"] = True
 
 
 
@@ -627,23 +627,28 @@ def get_ai_stock_gex_analysis(symbol: str, gex_json: str) -> str:
             "content": f"""You are a senior options-aware equity trader. Analyze the GEX (gamma exposure) data for **{symbol}** and give specific, actionable trading guidance.
 
 DATA FIELDS:
-- **Near_Net_GEX_B**: Net gamma in billions. Positive = dealers long gamma (suppress moves). Negative = dealers short gamma (amplify moves).
-- **Near_Tilt**: Call/put gamma balance. >1 = call-heavy (ceiling), <1 = put-heavy (acceleration).
+- **Near_Net_GEX_B**: Net gamma at SPOT in billions. Positive = dealers long gamma (suppress moves). Negative = dealers short gamma (amplify moves).
+- **Near_Tilt**: Call/put gamma balance at spot. >1 = call-heavy (ceiling), <1 = put-heavy (acceleration).
 - **Call_Wall / Call_Wall_Dist_pct**: Strongest resistance level from dealer hedging + distance from spot.
 - **Put_Wall / Put_Wall_Dist_pct**: Strongest support level + distance.
-- **Near_Flip / Near_Flip_Dist_pct**: Level where gamma flips sign + distance. Spot_vs_Flip shows which regime.
-- **Breakout_Risk / Breakout_Risk_Score**: True if spot is near call wall in positive gamma (breakout likely to fail). Score 0-100, higher = more dangerous breakout.
+- **Near_Flip / Near_Flip_Dist_pct**: Level where gamma flips sign + distance.
+- **Wall_Net_GEX_B / Wall_Sign**: Net dealer gamma REPRICED AT THE CALL WALL — this is the sign that decides whether the wall resists or accelerates a breakout. POSITIVE = dealers resist at the wall (fade breakout). NEGATIVE = dealers amplify at the wall (squeeze fuel). UNKNOWN = data unavailable.
+- **Breakout_Score**: 0-100 centred on 50. Higher = breakout more likely to work. Bands: 0-25 strong headwind (fade), 25-45 headwind, 45-55 gamma not a factor, 55-75 tailwind, 75-100 squeeze fuel. Score 50 means gamma has no opinion — decide on technicals alone.
+- **Breakout_Risk_Score**: 0-100, headwind magnitude only (= Wall_Pressure when Wall_Sign is POSITIVE, else 0). Higher = more dangerous breakout.
+- **Breakout_Favored**: True = rare high-conviction setup where dealers are short gamma at the wall.
 - **ATR**: Average true range for position sizing context.
 - **Dominant_Exp / Dominant_DTE**: Where most gamma is concentrated (expiration date and days to go).
 - **Call_Wall_Share_pct / Put_Wall_Share_pct**: How concentrated gamma is at the wall strikes.
-- **_chg suffix**: Day-over-day change. **GEX_flip** = "FLIPPED_POSITIVE" or "FLIPPED_NEGATIVE" if gamma crossed zero.
+- **_chg suffix**: Day-over-day change. **GEX_flip** = "FLIPPED_POSITIVE" or "FLIPPED_NEGATIVE" if gamma at spot crossed zero.
+
+IMPORTANT: The gamma sign at SPOT (Near_Net_GEX_B) and the gamma sign at the WALL (Wall_Sign) can differ. Most call walls are call-heavy, so even net-negative names at spot often flip POSITIVE at their wall. Use Wall_Sign / Breakout_Score for breakout analysis, not Near_Sign.
 
 STRUCTURE YOUR RESPONSE AS:
-1. **Gamma Regime** (1 sentence): Is the stock in positive or negative gamma? What does that mean for price action today?
+1. **Gamma Regime** (1 sentence): What is the gamma environment at spot? What does that mean for general price action?
 2. **Key Levels** (2-3 sentences): Call wall as resistance, put wall as support, flip level. How far is price from each? Which level matters most right now?
-3. **Breakout/Breakdown Risk** (1-2 sentences): If someone is buying a breakout above the call wall — will it work or fail? If Breakout_Risk is True, warn explicitly. Same for breakdown below put wall.
+3. **Breakout Assessment** (2-3 sentences): Use Breakout_Score and Wall_Sign. If score <= 25, warn that the wall resists — fade the breakout. If score >= 75, note the rare squeeze setup. If 45-55, say gamma is neutral — decide on technicals. Reference Wall_Sign to explain WHY.
 4. **Day-over-Day Shift** (1-2 sentences): What changed from yesterday? Did walls move? Did gamma flip? Is the structure getting more or less favorable?
-5. **Action** (1-2 sentences): Specific recommendation — buy/sell/wait, and at what levels. Reference the GEX levels.
+5. **Action** (1-2 sentences): Specific recommendation — buy/sell/wait, and at what levels. Reference the GEX levels and Breakout_Score.
 
 Be concise and direct. This is for an experienced trader who needs quick, actionable reads.
 
@@ -2444,18 +2449,18 @@ elif page == "Stock GEX":
 
     if not today_df.empty:
         display_cols = [
-            "Symbol", "Spot", "Near_Net_GEX_B", "Near_Sign", "Near_Tilt",
+            "Symbol", "Spot", "Near_Net_GEX_B", "Near_Tilt",
             "Call_Wall", "Call_Wall_Dist_pct", "Put_Wall", "Put_Wall_Dist_pct",
-            "Near_Flip", "Near_Flip_Dist_pct", "Spot_vs_Flip",
-            "Breakout_Risk", "Breakout_Risk_Score",
+            "Near_Flip", "Near_Flip_Dist_pct",
+            "Wall_Sign", "Breakout_Score", "Breakout_Risk_Score", "Breakout_Favored",
         ]
         display_cols = [c for c in display_cols if c in today_df.columns]
         tbl = today_df[display_cols].copy()
-        tbl = tbl.sort_values("Breakout_Risk_Score", ascending=False)
+        sort_col = "Breakout_Score" if "Breakout_Score" in tbl.columns else "Breakout_Risk_Score"
+        tbl = tbl.sort_values(sort_col, ascending=True, na_position="last")
 
         rename_map = {
             "Near_Net_GEX_B": "Net GEX ($B)",
-            "Near_Sign": "Sign",
             "Near_Tilt": "Tilt",
             "Call_Wall": "Call Wall",
             "Call_Wall_Dist_pct": "CW Dist%",
@@ -2463,25 +2468,36 @@ elif page == "Stock GEX":
             "Put_Wall_Dist_pct": "PW Dist%",
             "Near_Flip": "Flip",
             "Near_Flip_Dist_pct": "Flip Dist%",
-            "Spot_vs_Flip": "Regime",
-            "Breakout_Risk": "BO Risk",
-            "Breakout_Risk_Score": "BO Score",
+            "Wall_Sign": "Wall Sign",
+            "Breakout_Score": "BO Score",
+            "Breakout_Risk_Score": "BO Risk Score",
+            "Breakout_Favored": "BO Favored",
         }
         tbl = tbl.rename(columns={k: v for k, v in rename_map.items() if k in tbl.columns})
 
-        def color_sign(val):
+        def color_wall_sign(val):
             if val == "POSITIVE":
-                return "color: #2e7d32"
-            elif val == "NEGATIVE":
                 return "color: #c62828"
-            return ""
-
-        def color_bo_risk(val):
-            if val is True or val == "True":
-                return "background-color: rgba(198,40,40,0.15); color: #c62828; font-weight: bold"
+            elif val == "NEGATIVE":
+                return "color: #2e7d32"
             return ""
 
         def color_bo_score(val):
+            try:
+                v = float(val)
+            except (ValueError, TypeError):
+                return ""
+            if v <= 25:
+                return "background-color: rgba(198,40,40,0.15); color: #c62828; font-weight: bold"
+            elif v <= 45:
+                return "background-color: rgba(255,152,0,0.15); color: #e65100"
+            elif v >= 75:
+                return "background-color: rgba(46,125,50,0.15); color: #2e7d32; font-weight: bold"
+            elif v >= 55:
+                return "background-color: rgba(76,175,80,0.1); color: #2e7d32"
+            return ""
+
+        def color_bo_risk(val):
             try:
                 v = float(val)
             except (ValueError, TypeError):
@@ -2492,14 +2508,21 @@ elif page == "Stock GEX":
                 return "background-color: rgba(255,152,0,0.15); color: #e65100"
             return ""
 
+        def color_bo_favored(val):
+            if val is True or val == "True":
+                return "background-color: rgba(46,125,50,0.15); color: #2e7d32; font-weight: bold"
+            return ""
+
         styled = tbl.style
-        if "Sign" in tbl.columns:
-            styled = styled.map(color_sign, subset=["Sign"])
-        if "BO Risk" in tbl.columns:
-            styled = styled.map(color_bo_risk, subset=["BO Risk"])
+        if "Wall Sign" in tbl.columns:
+            styled = styled.map(color_wall_sign, subset=["Wall Sign"])
         if "BO Score" in tbl.columns:
             styled = styled.map(color_bo_score, subset=["BO Score"])
-        styled = styled.format({
+        if "BO Risk Score" in tbl.columns:
+            styled = styled.map(color_bo_risk, subset=["BO Risk Score"])
+        if "BO Favored" in tbl.columns:
+            styled = styled.map(color_bo_favored, subset=["BO Favored"])
+        fmt = {
             "Spot": "${:.2f}",
             "Net GEX ($B)": "{:+.3f}",
             "Tilt": "{:.2f}",
@@ -2509,40 +2532,41 @@ elif page == "Stock GEX":
             "PW Dist%": "{:.2f}%",
             "Flip": "${:,.0f}",
             "Flip Dist%": "{:+.2f}%",
-            "BO Score": "{:.1f}",
-        }, na_rep="—")
+            "BO Score": "{:.0f}",
+            "BO Risk Score": "{:.0f}",
+        }
+        styled = styled.format({k: v for k, v in fmt.items() if k in tbl.columns}, na_rep="—")
 
         st.dataframe(styled, use_container_width=True, height=min(40 * len(tbl) + 38, 600))
 
-        # Breakout risk warnings — split by gamma sign
-        high_bo = today_df[today_df["Breakout_Risk_Score"] >= 30].sort_values("Breakout_Risk_Score", ascending=False)
-        if not high_bo.empty:
-            pos_bo = high_bo[high_bo["Near_Sign"] == "POSITIVE"]
-            neg_bo = high_bo[high_bo["Near_Sign"] == "NEGATIVE"]
+        # Breakout alerts — driven by Breakout_Score
+        bo_score_col = pd.to_numeric(today_df.get("Breakout_Score"), errors="coerce")
+        if bo_score_col.notna().any():
+            fade = today_df[bo_score_col <= 25].sort_values("Breakout_Score")
+            squeeze = today_df[bo_score_col >= 75].sort_values("Breakout_Score", ascending=False)
 
-            if not pos_bo.empty:
+            if not fade.empty:
                 warns = []
-                for _, r in pos_bo.iterrows():
+                for _, r in fade.iterrows():
                     warns.append(
                         f"**{r['Symbol']}** — call wall at **${r['Call_Wall']:,.0f}** "
                         f"({r['Call_Wall_Dist_pct']:+.1f}% from spot ${r['Spot']:.2f}), "
-                        f"BO score **{r['Breakout_Risk_Score']:.0f}**/100"
+                        f"BO Score **{r.get('Breakout_Score', 0):.0f}**/100"
                     )
-                st.warning("**Breakout Risk — Positive Gamma (fade the breakout)** — "
-                           "dealers are long gamma and will sell into rallies near the call wall. "
-                           "Breakouts likely to fail and reverse.\n\n" + "\n\n".join(warns))
+                st.warning("**Fade the Breakout** — dealers are long gamma at the call wall and will sell into rallies. "
+                           "Breakouts above these walls are likely to fail and reverse.\n\n" + "\n\n".join(warns))
 
-            if not neg_bo.empty:
+            if not squeeze.empty:
                 warns = []
-                for _, r in neg_bo.iterrows():
+                for _, r in squeeze.iterrows():
                     warns.append(
                         f"**{r['Symbol']}** — call wall at **${r['Call_Wall']:,.0f}** "
                         f"({r['Call_Wall_Dist_pct']:+.1f}% from spot ${r['Spot']:.2f}), "
-                        f"BO score **{r['Breakout_Risk_Score']:.0f}**/100"
+                        f"BO Score **{r.get('Breakout_Score', 0):.0f}**/100"
                     )
-                st.info("**Breakout Watch — Negative Gamma (breakout accelerates)** — "
-                        "dealers are short gamma and will buy into rallies near the call wall. "
-                        "A break above the wall could trigger a gamma squeeze.\n\n" + "\n\n".join(warns))
+                st.info("**Squeeze Watch** — dealers are short gamma at the call wall. "
+                        "A break above could trigger a gamma squeeze as dealers buy to hedge. "
+                        "This setup is rare by construction.\n\n" + "\n\n".join(warns))
 
     st.divider()
 
@@ -2559,22 +2583,25 @@ elif page == "Stock GEX":
         sym_latest = sym_df.iloc[-1]
 
         # Key metrics row
-        mc = st.columns(6)
+        mc = st.columns(7)
         mc[0].metric("Spot", f"${sym_latest['Spot']:.2f}")
         mc[1].metric("Net GEX", f"${sym_latest['Near_Net_GEX_B']:+.3f}B" if pd.notna(sym_latest.get("Near_Net_GEX_B")) else "N/A")
         mc[2].metric("Tilt", f"{sym_latest['Near_Tilt']:.2f}" if pd.notna(sym_latest.get("Near_Tilt")) else "N/A")
         mc[3].metric("Call Wall", f"${sym_latest['Call_Wall']:,.0f}" if pd.notna(sym_latest.get("Call_Wall")) else "N/A")
         mc[4].metric("Put Wall", f"${sym_latest['Put_Wall']:,.0f}" if pd.notna(sym_latest.get("Put_Wall")) else "N/A")
-        bo_score = sym_latest.get("Breakout_Risk_Score", 0)
-        mc[5].metric("BO Risk Score", f"{bo_score:.0f}" if pd.notna(bo_score) else "N/A")
+        bo_s = sym_latest.get("Breakout_Score")
+        mc[5].metric("BO Score", f"{bo_s:.0f}" if pd.notna(bo_s) else "N/A")
+        bo_r = sym_latest.get("Breakout_Risk_Score")
+        mc[6].metric("BO Risk", f"{bo_r:.0f}" if pd.notna(bo_r) else "N/A")
 
         # AI analysis
         with st.expander("AI GEX Analysis", expanded=True):
             ai_fields = [
-                "Date", "Spot", "Near_Net_GEX_B", "Near_Sign", "Near_Tilt",
-                "Near_Flip", "Near_Flip_Dist_pct", "Spot_vs_Flip",
+                "Date", "Spot", "Near_Net_GEX_B", "Near_Tilt",
+                "Near_Flip", "Near_Flip_Dist_pct",
                 "Call_Wall", "Call_Wall_Dist_pct", "Put_Wall", "Put_Wall_Dist_pct",
-                "ATR", "Breakout_Risk", "Breakout_Risk_Score",
+                "ATR", "Breakout_Score", "Breakout_Risk_Score", "Breakout_Favored",
+                "Wall_Net_GEX_B", "Wall_Sign",
                 "Call_Wall_Gamma_B", "Call_Wall_Share_pct",
                 "Put_Wall_Gamma_B", "Put_Wall_Share_pct",
                 "Dominant_Exp", "Dominant_DTE",
@@ -2665,27 +2692,32 @@ elif page == "Stock GEX":
                 stamp_last_date(fig_s2, sym_df["Date"].max())
                 st.plotly_chart(fig_s2, use_container_width=True)
 
-        # Chart 3: Breakout Risk Score over time
-        if len(sym_df) >= 2 and "Breakout_Risk_Score" in sym_df.columns:
-            bo_data = sym_df[["Date", "Breakout_Risk_Score"]].dropna()
+        # Chart 3: Breakout Score over time
+        if len(sym_df) >= 2 and "Breakout_Score" in sym_df.columns:
+            bo_data = sym_df[["Date", "Breakout_Score"]].dropna(subset=["Breakout_Score"])
             if len(bo_data) >= 2:
-                st.subheader(f"{selected} — Breakout Risk Score")
+                st.subheader(f"{selected} — Breakout Score")
                 fig_s3 = go.Figure()
                 colors_bo = [
-                    "rgba(198,40,40,0.7)" if v >= 50 else
-                    "rgba(255,152,0,0.7)" if v >= 20 else
-                    "rgba(76,175,80,0.7)"
-                    for v in bo_data["Breakout_Risk_Score"].fillna(0)
+                    "rgba(198,40,40,0.7)" if v <= 25 else
+                    "rgba(255,152,0,0.7)" if v <= 45 else
+                    "rgba(158,158,158,0.5)" if v <= 55 else
+                    "rgba(76,175,80,0.6)" if v <= 75 else
+                    "rgba(46,125,50,0.8)"
+                    for v in bo_data["Breakout_Score"].fillna(50)
                 ]
                 fig_s3.add_trace(go.Bar(
-                    x=bo_data["Date"], y=bo_data["Breakout_Risk_Score"],
-                    marker_color=colors_bo, name="BO Risk Score",
+                    x=bo_data["Date"], y=bo_data["Breakout_Score"],
+                    marker_color=colors_bo, name="BO Score",
                 ))
-                fig_s3.add_hline(y=50, line_dash="dash", line_color="red", line_width=1,
-                                 annotation_text="High risk", annotation_position="bottom right")
-                fig_s3.add_hline(y=20, line_dash="dash", line_color="orange", line_width=0.8,
-                                 annotation_text="Moderate", annotation_position="bottom right")
+                fig_s3.add_hline(y=50, line_dash="dash", line_color="black", line_width=1,
+                                 annotation_text="Neutral (50)", annotation_position="bottom right")
+                fig_s3.add_hline(y=25, line_dash="dot", line_color="red", line_width=0.8,
+                                 annotation_text="Strong headwind", annotation_position="bottom right")
+                fig_s3.add_hline(y=75, line_dash="dot", line_color="green", line_width=0.8,
+                                 annotation_text="Squeeze fuel", annotation_position="bottom right")
                 fig_s3.update_layout(height=300, xaxis_title="Date", yaxis_title="Score (0-100)",
+                                     yaxis_range=[0, 100],
                                      hovermode="x unified", margin=CHART_MARGIN)
                 stamp_last_date(fig_s3, sym_df["Date"].max())
                 st.plotly_chart(fig_s3, use_container_width=True)
@@ -2693,12 +2725,16 @@ elif page == "Stock GEX":
         # Footnotes
         st.caption(
             "**How to use Stock GEX for trading:**\n\n"
-            "**Call Wall** = strongest resistance from dealer gamma hedging. "
-            "If spot approaches the call wall in **positive gamma**, dealers sell into the rally → breakout likely fails. "
-            "The higher the **Breakout Risk Score**, the more dangerous the breakout attempt.\n\n"
-            "**Put Wall** = strongest support. In positive gamma, dealers buy dips near the put wall → support holds.\n\n"
-            "**Gamma Flip** = the price where dealer gamma switches sign. "
-            "Above the flip: positive gamma (mean-reversion, ranges). Below: negative gamma (momentum, acceleration).\n\n"
+            "**Breakout Score** (0-100, centred on 50) — the single number for breakout decisions. "
+            "0-25: strong headwind (fade). 25-45: headwind. 45-55: gamma neutral (use technicals). "
+            "55-75: tailwind. 75-100: squeeze fuel. Note: score 50 means gamma has no opinion, not a green light.\n\n"
+            "**BO Risk Score** — headwind magnitude only (high = dangerous breakout). "
+            "Risk 0 + Score 50 = nothing there. Risk 0 + Score 85 = dealers actively pushing the move.\n\n"
+            "**Wall Sign** — gamma repriced AT the call wall, not at spot. "
+            "POSITIVE = dealers resist at the wall (fade). NEGATIVE = dealers amplify (squeeze). "
+            "Most walls are POSITIVE even when gamma at spot is negative.\n\n"
+            "**Call Wall** = strongest resistance. **Put Wall** = strongest support. "
+            "**Gamma Flip** = price where gamma switches sign.\n\n"
             "**Tilt** > 1 = call-heavy (upside capped). Tilt < 1 = put-heavy (downside risk amplified).\n\n"
             "**Day-over-day wall changes**: Call wall moving up = dealers repositioning higher (bullish). "
             "Put wall dropping = support weakening (bearish). Both moving same direction = follow the shift."
