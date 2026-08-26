@@ -991,8 +991,6 @@ if page == "Market Overview":
                 st.error(f"Strategy recommendations failed: {e}")
 
         st.divider()
-        with st.expander("Raw Signal Data (5-day trailing)"):
-            st.json(trailing)
 
         st.markdown('</div>', unsafe_allow_html=True)
 
