@@ -271,10 +271,6 @@ def disk_cache_set(prefix: str, result: str, *args):
     key = hashlib.md5("".join(args).encode()).hexdigest()
     cache_file = CACHE_DIR / f"{prefix}_{key}.txt"
     cache_file.write_text(result, encoding="utf-8")
-    # Clean old cache files for this prefix (keep only latest)
-    for f in CACHE_DIR.glob(f"{prefix}_*.txt"):
-        if f != cache_file:
-            f.unlink()
 
 
 def check_scheduled_cache_clear():
@@ -299,6 +295,8 @@ def check_scheduled_cache_clear():
     for f in CACHE_DIR.glob("strategies_*.txt"):
         f.unlink()
     for f in CACHE_DIR.glob("headlines_*.txt"):
+        f.unlink()
+    for f in CACHE_DIR.glob("stock_gex_*.txt"):
         f.unlink()
     # Clear ALL Streamlit in-memory caches (Dropbox data + everything else)
     # This forces fresh downloads from Dropbox on next page load
