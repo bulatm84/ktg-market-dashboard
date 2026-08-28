@@ -311,14 +311,14 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v8 (clear cached API error) ---
-if "cache_cleared_v8" not in st.session_state:
+# --- One-time cache buster v9 (refresh for expanded stock GEX universe) ---
+if "cache_cleared_v9" not in st.session_state:
     for _f in CACHE_DIR.glob("*.txt"):
         _f.unlink()
     for _f in CACHE_DIR.glob("*.marker"):
         _f.unlink()
     st.cache_data.clear()
-    st.session_state["cache_cleared_v8"] = True
+    st.session_state["cache_cleared_v9"] = True
 
 
 
