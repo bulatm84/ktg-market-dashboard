@@ -311,14 +311,11 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v9 (refresh for expanded stock GEX universe) ---
-if "cache_cleared_v9" not in st.session_state:
-    for _f in CACHE_DIR.glob("*.txt"):
+# --- One-time cache buster v10 (re-generate stock GEX AI with significance gate) ---
+if "cache_cleared_v10" not in st.session_state:
+    for _f in CACHE_DIR.glob("stock_gex_*.txt"):
         _f.unlink()
-    for _f in CACHE_DIR.glob("*.marker"):
-        _f.unlink()
-    st.cache_data.clear()
-    st.session_state["cache_cleared_v9"] = True
+    st.session_state["cache_cleared_v10"] = True
 
 
 
@@ -603,7 +600,7 @@ Keep it concise (4-5 paragraphs). Use **bold** for key terms. Be direct and acti
 
 
 # --- AI Stock GEX Analysis ---
-def get_ai_stock_gex_analysis(symbol: str, gex_json: str) -> str:
+def get_ai_stock_gex_analysis(symbol: str, gex_json: str, gex_pct_avol: float | None = None) -> str:
     """Call Claude API to interpret a single stock's GEX data with day-over-day changes."""
     cache_key = f"{get_cache_date()}_{symbol}"
     cached = disk_cache_get("stock_gex", cache_key)
@@ -616,6 +613,37 @@ def get_ai_stock_gex_analysis(symbol: str, gex_json: str) -> str:
             api_key = st.secrets["ANTHROPIC_API_KEY"]
         except (KeyError, AttributeError):
             return "**API key not configured.**"
+
+    # Determine significance tier from GEX as % of average volume
+    if gex_pct_avol is None or pd.isna(gex_pct_avol):
+        sig_tier = "unknown"
+        sig_instruction = (
+            "GEX_pct_AVOL is unavailable. Treat gamma as NOT a factor. "
+            "Report levels only — do NOT produce fade, pin, breakout, or mean-reversion theses."
+        )
+    elif gex_pct_avol < 5:
+        sig_tier = "insignificant"
+        sig_instruction = (
+            f"GEX_pct_AVOL = {gex_pct_avol:.2f}% — gamma is NOT a factor at this size "
+            f"(< 5% of average daily volume). Dealer hedging this small cannot pin or steer a stock. "
+            "Report levels for awareness only. DO NOT produce a fade, pin, breakout, or "
+            "mean-reversion thesis based on gamma. State clearly that gamma is too small to matter "
+            "and the trader should decide on technicals/flow."
+        )
+    elif gex_pct_avol < 15:
+        sig_tier = "moderate"
+        sig_instruction = (
+            f"GEX_pct_AVOL = {gex_pct_avol:.2f}% — moderate significance (5-15% of AVOL). "
+            "Gamma may influence price action as a secondary factor but is not dominant. "
+            "Frame any gamma-based thesis as conditional, not definitive."
+        )
+    else:
+        sig_tier = "strong"
+        sig_instruction = (
+            f"GEX_pct_AVOL = {gex_pct_avol:.2f}% — strong significance (>= 15% of AVOL). "
+            "Dealer hedging is a major factor. A gamma-driven thesis is justified."
+        )
+
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
         model="claude-sonnet-5",
@@ -625,14 +653,18 @@ def get_ai_stock_gex_analysis(symbol: str, gex_json: str) -> str:
             "role": "user",
             "content": f"""You are a senior options-aware equity trader. Analyze the GEX (gamma exposure) data for **{symbol}** and give specific, actionable trading guidance.
 
+SIGNIFICANCE GATE (APPLY FIRST — THIS OVERRIDES EVERYTHING BELOW):
+{sig_instruction}
+
 DATA FIELDS:
+- **GEX_pct_AVOL**: Gamma exposure as a percentage of 50-day average dollar volume. This is the SIGNIFICANCE metric. < 5% = gamma is not a factor (decide on technicals). 5-15% = moderate, gamma is a secondary consideration. >= 15% = strong, gamma-driven thesis justified.
 - **Near_Net_GEX_B**: Net gamma at SPOT in billions. Positive = dealers long gamma (suppress moves). Negative = dealers short gamma (amplify moves).
 - **Near_Tilt**: Call/put gamma balance at spot. >1 = call-heavy (ceiling), <1 = put-heavy (acceleration).
 - **Call_Wall / Call_Wall_Dist_pct**: Strongest resistance level from dealer hedging + distance from spot.
 - **Put_Wall / Put_Wall_Dist_pct**: Strongest support level + distance.
 - **Near_Flip / Near_Flip_Dist_pct**: Level where gamma flips sign + distance.
-- **Wall_Net_GEX_B / Wall_Sign**: Net dealer gamma REPRICED AT THE CALL WALL — this is the sign that decides whether the wall resists or accelerates a breakout. POSITIVE = dealers resist at the wall (fade breakout). NEGATIVE = dealers amplify at the wall (squeeze fuel). UNKNOWN = data unavailable.
-- **Breakout_Score**: 0-100 centred on 50. Higher = breakout more likely to work. Bands: 0-25 strong headwind (fade), 25-45 headwind, 45-55 gamma not a factor, 55-75 tailwind, 75-100 squeeze fuel. Score 50 means gamma has no opinion — decide on technicals alone.
+- **Wall_Net_GEX_B / Wall_Sign**: Net dealer gamma REPRICED AT THE CALL WALL — this is the sign that decides whether the wall resists or accelerates a breakout. POSITIVE = dealers resist at the wall (fade breakout). NEGATIVE = dealers amplify at the wall (squeeze fuel). UNKNOWN = data unavailable. NOTE: Wall_Sign is POSITIVE ~96% of the time — it is the default state, not a finding. Do not treat it as a standalone signal.
+- **Breakout_Score**: 0-100 centred on 50. Higher = breakout more likely to work. WARNING: the >50 half requires Wall_Sign == NEGATIVE, which is rare (~4%). In practice 95%+ of values fall in 45-55 and the max observed is ~55. A score of 48 is NOT "dead neutral" — it may be bottom-quintile for that day. Interpret relative to the distribution, not the nominal bands. Do NOT double-count Breakout_Score and Wall_Sign as independent signals — the score is DERIVED from the sign.
 - **Breakout_Risk_Score**: 0-100, headwind magnitude only (= Wall_Pressure when Wall_Sign is POSITIVE, else 0). Higher = more dangerous breakout.
 - **Breakout_Favored**: True = rare high-conviction setup where dealers are short gamma at the wall.
 - **ATR**: Average true range for position sizing context.
@@ -643,11 +675,11 @@ DATA FIELDS:
 IMPORTANT: The gamma sign at SPOT (Near_Net_GEX_B) and the gamma sign at the WALL (Wall_Sign) can differ. Most call walls are call-heavy, so even net-negative names at spot often flip POSITIVE at their wall. Use Wall_Sign / Breakout_Score for breakout analysis, not Near_Sign.
 
 STRUCTURE YOUR RESPONSE AS:
-1. **Gamma Regime** (1 sentence): What is the gamma environment at spot? What does that mean for general price action?
-2. **Key Levels** (2-3 sentences): Call wall as resistance, put wall as support, flip level. How far is price from each? Which level matters most right now?
-3. **Breakout Assessment** (2-3 sentences): Use Breakout_Score and Wall_Sign. If score <= 25, warn that the wall resists — fade the breakout. If score >= 75, note the rare squeeze setup. If 45-55, say gamma is neutral — decide on technicals. Reference Wall_Sign to explain WHY.
-4. **Day-over-Day Shift** (1-2 sentences): What changed from yesterday? Did walls move? Did gamma flip? Is the structure getting more or less favorable?
-5. **Action** (1-2 sentences): Specific recommendation — buy/sell/wait, and at what levels. Reference the GEX levels and Breakout_Score.
+1. **Gamma Regime** (1 sentence): State the GEX_pct_AVOL significance level first. Then describe the gamma environment at spot.
+2. **Key Levels** (2-3 sentences): Call wall as resistance, put wall as support, flip level. How far is price from each? Which level matters most right now? (Always report levels regardless of significance.)
+3. **Breakout Assessment** (2-3 sentences): ONLY if GEX_pct_AVOL >= 5%. If < 5%, state "gamma is too small to drive a breakout thesis — decide on technicals." Do not reference Breakout_Score or Wall_Sign as actionable when gamma is insignificant.
+4. **Day-over-Day Shift** (1-2 sentences): What changed from yesterday? Did walls move? Did gamma flip? Report factually regardless of significance.
+5. **Action** (1-2 sentences): If gamma is significant, give gamma-based guidance. If insignificant, say "GEX does not give an edge here — trade the chart."
 
 Be concise and direct. This is for an experienced trader who needs quick, actionable reads.
 
@@ -2597,7 +2629,7 @@ elif page == "Stock GEX":
                 "Date", "Spot", "Near_Net_GEX_B", "Near_Tilt",
                 "Near_Flip", "Near_Flip_Dist_pct",
                 "Call_Wall", "Call_Wall_Dist_pct", "Put_Wall", "Put_Wall_Dist_pct",
-                "ATR", "Breakout_Score", "Breakout_Risk_Score", "Breakout_Favored",
+                "ATR", "GEX_pct_AVOL", "Breakout_Score", "Breakout_Risk_Score", "Breakout_Favored",
                 "Wall_Net_GEX_B", "Wall_Sign",
                 "Call_Wall_Gamma_B", "Call_Wall_Share_pct",
                 "Put_Wall_Gamma_B", "Put_Wall_Share_pct",
@@ -2632,8 +2664,9 @@ elif page == "Stock GEX":
             records = ai_data.where(ai_data.notna(), None).to_dict(orient="records")
             gex_json = json.dumps(records, default=str)
 
+            latest_gex_pct = sym_latest.get("GEX_pct_AVOL")
             try:
-                analysis = get_ai_stock_gex_analysis(selected, gex_json)
+                analysis = get_ai_stock_gex_analysis(selected, gex_json, gex_pct_avol=latest_gex_pct)
                 st.markdown(analysis.replace("$", r"\$"))
             except Exception as e:
                 st.error(f"AI analysis failed: {e}")
