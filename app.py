@@ -311,11 +311,11 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v10 (re-generate stock GEX AI with significance gate) ---
-if "cache_cleared_v10" not in st.session_state:
-    for _f in CACHE_DIR.glob("stock_gex_*.txt"):
+# --- One-time cache buster v11 (re-generate all AI analyses with plain-English output) ---
+if "cache_cleared_v11" not in st.session_state:
+    for _f in CACHE_DIR.glob("*.txt"):
         _f.unlink()
-    st.session_state["cache_cleared_v10"] = True
+    st.session_state["cache_cleared_v11"] = True
 
 
 
@@ -435,6 +435,20 @@ For each recommended structure, explain:
 One paragraph on position sizing and risk given the current volatility regime. Reference VIX level and gamma environment.
 
 Use **bold** for key terms. Be specific and actionable — this is for an experienced systematic trader, not a beginner.
+
+CRITICAL OUTPUT RULE — PLAIN ENGLISH ONLY:
+NEVER use raw variable names like Net_GEX_B, Gamma_Tilt, EMA_8_20, OFI_5d, CMF, R1_close, etc. in your output. Always translate to plain English that any trader would understand:
+- Net_GEX_B → "net gamma exposure" or "dealer gamma"
+- Gamma_Tilt → "call/put gamma balance"
+- GEX_flip → "gamma flipped positive/negative"
+- EMA_8_20 / EMA_20_200 → "short-term trend (8/20 EMA)" / "long-term trend (20/200 EMA)"
+- OFI_5d → "order flow" or "net buying/selling pressure"
+- CMF → "money flow"
+- R1_close / S1_close → "stocks closing above resistance" / "stocks closing below support"
+- pct_above_EMA20/50 → "% of stocks above their 20/50-day moving average"
+- OR_range → "opening range"
+- VWAP_dev → "deviation from VWAP"
+Use actual values and numbers, just describe them in terms any trader would understand.
 
 5-Day Trailing Market Signals:
 {signals_json}"""
@@ -580,13 +594,30 @@ Analyze both the CURRENT state and the TRAJECTORY over the past 5 days. Specific
 4. **Divergences & risks** — Any indicators moving in opposite directions? Any headline risks not yet reflected in the quantitative data?
 
 GEX DAY-OVER-DAY FIELDS — pay special attention to these:
-- **GEX_flip**: "FLIPPED_POSITIVE" or "FLIPPED_NEGATIVE" means Net GEX crossed zero from the prior day — this is a MAJOR regime shift. A flip to positive means dealers shifted from amplifying to suppressing volatility; a flip to negative means the opposite.
-- **Net_GEX_norm_chg / Net_GEX_B_chg**: Day-over-day change in GEX. Large moves signal rapid repositioning by options dealers.
+- **GEX_flip**: "FLIPPED_POSITIVE" or "FLIPPED_NEGATIVE" means net gamma exposure crossed zero from the prior day — this is a MAJOR regime shift. A flip to positive means dealers shifted from amplifying to suppressing volatility; a flip to negative means the opposite.
+- **Net_GEX_norm_chg / Net_GEX_B_chg**: Day-over-day change in gamma exposure. Large moves signal rapid repositioning by options dealers.
 - **Gamma_Tilt_chg**: Shift in call/put gamma balance. Rising tilt = increasing call-side hedging (ceiling effect), falling tilt = increasing put-side hedging (acceleration risk).
 - **Flip_Dist_pct_chg**: Change in distance to the gamma flip level. Shrinking distance = approaching a regime change.
 - **Net_Sign / Spot_vs_Flip**: Current gamma regime and whether SPX is above/below the flip level.
 
 When GEX_flip appears, lead with it — it changes everything about strategy recommendations.
+
+CRITICAL OUTPUT RULE — PLAIN ENGLISH ONLY:
+Your audience includes traders who may not know internal column names. NEVER use raw variable names like Net_GEX_B, Gamma_Tilt, EMA_8_20, OFI_5d, CMF, etc. in your output. Always translate to plain English:
+- Net_GEX_B / Net_GEX_norm → "net gamma exposure" or "dealer gamma"
+- Gamma_Tilt → "call/put gamma balance" or "gamma tilt toward calls/puts"
+- Net_Sign → "positive gamma" or "negative gamma"
+- GEX_flip → "gamma flipped positive/negative"
+- Flip_Dist_pct → "distance to the gamma flip level"
+- EMA_8_20 / EMA_20_200 → "short-term trend" / "long-term trend" or "8/20 EMA crossover"
+- OFI_5d → "order flow" or "net buying/selling pressure"
+- CMF → "money flow" or "Chaikin money flow"
+- RealVol_20d → "realized volatility"
+- pct_above_EMA20/50/200 → "% of stocks above their 20/50/200-day moving average"
+- R1_close / S1_close → "stocks closing above resistance" / "stocks closing below support"
+- OR_range → "opening range"
+- VWAP_dev → "deviation from VWAP"
+Use the actual values and numbers, just describe them in terms any trader would understand.
 
 Keep it concise (4-5 paragraphs). Use **bold** for key terms. Be direct and actionable. When discussing shifts, reference specific day-over-day changes and connect to catalysts.
 
