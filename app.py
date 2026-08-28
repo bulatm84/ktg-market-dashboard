@@ -724,7 +724,10 @@ Be concise and direct. This is for an experienced trader who needs quick, action
 
 
 # --- Page Navigation ---
-page = st.sidebar.radio("Dashboard", ["Market Overview", "Sectors & Commodities", "VIX", "Put/Call Ratio", "Advance/Decline", "Treasury Yields", "Pivot Breadth", "Order Flow", "Gamma (GEX)", "Stock GEX", "SPY Technicals"])
+PAGES = ["Market Overview", "Sectors & Commodities", "VIX", "Put/Call Ratio",
+         "Advance/Decline", "Treasury Yields", "Pivot Breadth", "Order Flow",
+         "Gamma (GEX)", "Stock GEX", "SPY Technicals", "📖 Documentation"]
+page = st.sidebar.radio("Dashboard", PAGES)
 
 # --- Shared date filter helper ---
 def date_filter(df, date_col):
@@ -2990,3 +2993,382 @@ elif page == "SPY Technicals":
                           yaxis_tickformat=".0%", hovermode="x unified", margin=CHART_MARGIN)
     stamp_last_date(fig_agg, df["date"].max())
     st.plotly_chart(fig_agg, use_container_width=True)
+
+
+# =====================================================================
+# DOCUMENTATION PAGE
+# =====================================================================
+elif page == "📖 Documentation":
+    st.title("Dashboard Documentation")
+    st.markdown("*A comprehensive guide to every tab, metric, and chart — for traders at all experience levels.*")
+    st.markdown("---")
+
+    # --- Getting Started ---
+    with st.expander("Getting Started", expanded=True):
+        st.markdown("""
+The KTG Market Dashboard brings together multiple market signals into a single view.
+It refreshes daily at **8:45 AM ET** on weekdays, pulling fresh data and generating
+AI-powered analysis automatically.
+
+Use the **sidebar on the left** to navigate between tabs. Most tabs have a **date range
+filter** in the sidebar that lets you zoom in on a specific period. The dashboard is
+read-only — you cannot break anything by clicking around.
+
+**How to read this guide:** Each section covers one tab. For every tab you will find:
+what the key metrics mean, what each chart shows, and — most importantly — how to use
+it for trading decisions. Trading tips are highlighted in green throughout.
+""")
+
+    # --- Market Overview ---
+    with st.expander("Market Overview"):
+        st.markdown("""
+This is your **morning briefing**. It shows eight headline metrics at the top and three
+AI-generated sections below: a Regime Summary, Actionable Strategies, and curated Headlines.
+
+#### Key Metrics
+| Metric | What It Means |
+|--------|---------------|
+| **VIX** | CBOE Volatility Index — the market's expectation of 30-day volatility. Higher = more fear. |
+| **PCR** | Put/Call Ratio — total put volume divided by call volume. Above 1.0 = more puts (bearish sentiment). |
+| **GEX** | Net Gamma Exposure in billions — whether options dealers are suppressing or amplifying moves. |
+| **R1 Fail** | % of S&P 500 stocks that touched first resistance but failed to close above it. High = breakouts are failing. |
+| **OFI** | Order Flow Imbalance — net aggressive buying vs. selling in SPY. Positive = buyers in control. |
+| **Adv %** | Percentage of S&P 500 stocks that advanced today. |
+| **RSI** | SPY's 14-day Relative Strength Index. Above 70 = overbought, below 30 = oversold. |
+| **Spread** | 2-year minus 30-year Treasury yield spread. Negative = inverted curve (recession signal). |
+
+#### AI Regime Summary
+Claude reads the last 5 trading days of all dashboard signals plus recent macro headlines,
+then classifies the market as **risk-on**, **risk-off**, or **transitional**. It highlights
+what changed, what is trending, and any divergences between indicators.
+
+> **Trading tip:** Read the regime summary first thing in the morning. It tells you whether
+> today favors breakout trades, mean-reversion fades, or sitting on the sidelines.
+
+#### Actionable Strategies
+A second AI call builds on the regime summary and recommends:
+- **Trading Style Regime** — swing trading (multi-day), day trading (intraday only), or neutral (reduce size)
+- **Stock Strategies** — breakout, mean-reversion, directional short, or sit out
+- **Options Strategies** — specific structures matched to the current IV and gamma environment
+- **Risk Management** — position-sizing guidance for current volatility
+
+#### Headlines
+The right column shows the 5–8 most market-relevant headlines from major financial RSS feeds,
+filtered and annotated by AI for regime relevance.
+""")
+
+    # --- Sectors & Commodities ---
+    with st.expander("Sectors & Commodities"):
+        st.markdown("""
+Shows cumulative returns for **sector ETFs** (XLK, XLF, XLV, etc.) and **commodity ETFs**
+(GLD, SLV, USO, etc.) over a selectable lookback window (1 week to 12 months).
+
+#### Charts
+- **Sector ETF Cumulative Returns** — each line is a sector, sorted by final return
+- **Commodity ETF Cumulative Returns** — same layout for commodities
+
+#### Interpretation
+The info box compares **cyclical sectors** (Tech, Discretionary, Financials, Industrials,
+Materials) against **defensive sectors** (Utilities, Staples, Healthcare, Real Estate).
+When cyclicals outperform defensives, the market is in **risk-on** mode. The reverse signals
+**risk-off** rotation.
+
+> **Trading tip:** If gold (GLD) is outperforming while cyclicals lag, that's a classic
+> flight-to-safety signal. If energy (XLE/USO) is surging while everything else is flat,
+> watch for inflation-driven repricing.
+""")
+
+    # --- VIX ---
+    with st.expander("VIX (Volatility Index)"):
+        st.markdown("""
+The VIX tab tracks implied volatility. Think of the VIX as the price of insurance — when
+traders are nervous, they pay more for puts, which pushes the VIX up.
+
+#### Key Metrics
+| Metric | What It Means |
+|--------|---------------|
+| **VIX Level** | Below 15 = calm. 15–20 = normal. 20–30 = elevated. Above 30 = high fear. |
+| **Regime** | Low Vol, Normal, Elevated, or High Vol. |
+| **10d / 20d Z-Score** | Standard deviations from recent average. Above +2 = extreme spike. Below -2 = extreme calm. |
+| **60d Ratio** | VIX divided by its 60-day average. Above 1.0 = elevated vs. recent history. |
+
+#### Charts
+- **VIX Level & Moving Averages** — with optional MAs and Bollinger Bands
+- **VIX Z-Scores** — how unusual the current reading is
+- **SPY 20d Realized Vol / VIX** — compares actual vs. expected volatility. Below 0.8 = implied vol overpriced (good for selling premium). Above 1.2 = options may be cheap.
+- **COR1M (Implied Correlation)** — high correlation = macro-driven market. Low = stock-picker's market.
+
+> **Trading tip:** A VIX z-score above +2 often marks a short-term market bottom (peak fear).
+> A z-score below -2 means complacency, which can precede a volatility spike.
+""")
+
+    # --- Put/Call Ratio ---
+    with st.expander("Put/Call Ratio"):
+        st.markdown("""
+The Put/Call Ratio (PCR) measures **sentiment** by comparing put volume to call volume.
+It is a contrarian indicator — extreme readings often signal the crowd is wrong.
+
+#### Key Metrics
+| Metric | What It Means |
+|--------|---------------|
+| **PCR** | Put volume / call volume. Below 0.7 = bullish. Above 1.0 = fearful. |
+| **Sentiment** | Bullish, Neutral, Cautious, or Fearful. |
+| **20d MA** | 20-day moving average — smooths daily noise. |
+| **Z-Score** | How extreme today's PCR is vs. its 20-day range. |
+
+#### Charts
+- **Put/Call Ratio** — over time with color-banded sentiment zones
+- **Call vs Put Volume** — grouped bars with PCR line overlay
+
+> **Trading tip:** The PCR is contrarian: spikes above 1.2 (extreme fear) often precede
+> bounces. Drops below 0.6 (extreme complacency) can precede pullbacks. Use it to time
+> entries, not as a standalone signal.
+""")
+
+    # --- Advance/Decline ---
+    with st.expander("Advance/Decline"):
+        st.markdown("""
+Market breadth measures *how many* stocks are participating in a move, not just the index.
+A rally where only a handful of mega-caps go up while most stocks decline is fragile.
+
+#### Key Metrics
+| Metric | What It Means |
+|--------|---------------|
+| **A-D (net)** | Advancing stocks minus declining stocks today. |
+| **Breadth** | Strong, Positive, Negative, or Weak. |
+| **Advance %** | Percentage of stocks that advanced. |
+| **5d / 20d Z-Score** | How extreme today's breadth is vs. recent history. |
+
+#### Charts
+- **Cumulative A/D Line** — a running total. Rising = broad participation. Falling while index rises = dangerous divergence.
+- **Advance %** — daily with 20-day MA. The 50% line is neutral.
+
+> **Trading tip:** A breadth thrust (z-score above +2) after a selloff is one of the most
+> reliable buy signals in market history — buyers flooded back in across the board.
+""")
+
+    # --- Treasury Yields ---
+    with st.expander("Treasury Yields"):
+        st.markdown("""
+Treasury yields reflect the bond market's view on economic growth and inflation. The
+**yield curve** (spread between short and long-term rates) is one of the most watched
+recession indicators.
+
+#### Key Metrics
+| Metric | What It Means |
+|--------|---------------|
+| **2Y Yield** | Reflects expectations for short-term Fed policy. |
+| **30Y Yield** | Reflects long-term growth and inflation expectations. |
+| **2-30 Spread** | 30Y minus 2Y. Negative = inverted curve. Positive = normal. |
+| **Curve** | Inverted, Flat, Normal, or Steep. |
+
+#### Charts
+- **2-Year & 30-Year Yields** — overlaid. When they cross, the curve inverts.
+- **2Y-30Y Spread** — area chart. Below zero = inverted (historically precedes recessions).
+
+> **Trading tip:** A steepening curve (spread rising) signals improving growth expectations.
+> A flattening or inverting curve signals tightening conditions. Rapid moves matter more
+> than absolute levels.
+""")
+
+    # --- Pivot Breadth ---
+    with st.expander("Pivot Breadth"):
+        st.markdown("""
+Pivot points are price levels calculated from the prior day's high, low, and close.
+This tab shows what percentage of S&P 500 stocks are breaking through or failing at these levels.
+
+#### Key Metrics
+| Metric | What It Means |
+|--------|---------------|
+| **Close > PP** | % closing above central pivot — above 50% = bullish bias. |
+| **Close > R1** | % closing above first resistance — measures breakout strength. |
+| **Failed R1** | % that reached R1 but failed to close above — measures breakout quality. |
+| **Close < S1** | % closing below first support — measures breakdown strength. |
+| **Failed S1** | % that hit S1 but recovered — measures support quality. |
+
+#### Key Charts
+- **Breakout vs Fade Regime (R1)** — compares breakout-hold rate vs. failure rate
+- **% of S&P 500 Above EMAs** — percentage above 5, 8, 20, 50, and 200-day EMAs
+
+#### Sidebar Controls
+- **Moving Average** dropdown: smooth with 5d, 10d (default), or 20d MA
+- **View Mode**: Resistance, Support, or Both
+
+> **Trading tip:** High R1 failure rates + negative gamma (from GEX tab) = classic
+> mean-reversion environment. Low R1 failure rates + positive breadth = breakout environment.
+""")
+
+    # --- Order Flow ---
+    with st.expander("Order Flow"):
+        st.markdown("""
+Order flow data shows who is more aggressive in SPY — buyers or sellers. Unlike price-based
+indicators, order flow measures *intent* by tracking market orders that hit the bid (aggressive
+sells) or lift the ask (aggressive buys).
+
+#### Key Metrics
+| Metric | What It Means |
+|--------|---------------|
+| **OFI Ratio** | Net aggressive buying vs. selling. Positive = net buying. |
+| **Flow Bias** | Strong Buy, Buy, Neutral, Sell, or Strong Sell. |
+| **VWAP Dev** | How far SPY closed from VWAP. Positive = closed above (buyers won). |
+| **Intra Return** | SPY's intraday return (open to close). |
+| **OR Range** | Opening range in dollars — size of first 30 minutes' range. |
+
+#### Charts
+- **Daily OFI Ratio** — green bars = net buying, red = net selling
+- **Intraday OFI Breakdown** — first 30 min vs. full day
+- **Final VWAP Deviation** — where SPY closed relative to VWAP
+- **Bid/Ask Aggressor Ratio** — above 50% = buyers more aggressive
+
+> **Trading tip:** Consistent positive OFI across multiple days confirms a real trend.
+> A single day of extreme OFI followed by reversal often marks short-term exhaustion.
+""")
+
+    # --- Gamma (GEX) ---
+    with st.expander("Gamma (GEX) — SPX Index"):
+        st.markdown("""
+Gamma Exposure (GEX) measures **how options dealers are positioned** and how they must hedge.
+This creates predictable mechanical flows that either suppress or amplify price moves.
+
+#### The Core Concept
+When dealers are **long gamma** (positive GEX), they must sell as prices rise and buy as
+prices fall — this *dampens* volatility and pins price near key levels.
+When dealers are **short gamma** (negative GEX), they must buy as prices rise and sell as
+prices fall — this *amplifies* moves and creates momentum.
+
+#### Key Metrics
+| Metric | What It Means |
+|--------|---------------|
+| **Net GEX** | Net gamma in billions. Positive = dealers suppress moves. Negative = dealers amplify. |
+| **Environment** | Strong +Gamma, Positive Gamma, Negative Gamma, or Deep -Gamma. |
+| **Gamma Tilt** | Call/put gamma balance. Above 1.0 = call-heavy (upside capped). Below 1.0 = put-heavy (downside acceleration). |
+| **Flip Level** | SPX price where dealer gamma switches sign — a critical regime boundary. |
+| **Call Wall** | Strike with most call gamma — acts as resistance. |
+| **Put Wall** | Strike with most put gamma — acts as support. |
+
+#### Charts
+- **Net GEX (Normalized)** — green = positive gamma (calm), red = negative (volatile)
+- **Net GEX (\\$ Billions)** — same data in raw dollar terms
+- **Gamma Tilt** — call/put balance over time. 1.0 reference line = balanced
+- **SPX vs Key Gamma Levels** — the most important chart: spot price vs. Call Wall, Put Wall, and Flip Level
+- **Wall Day-over-Day Change** — how walls moved. Both rising = bullish repositioning. Both falling = bearish.
+
+> **Trading tip:** In positive gamma, expect mean-reversion — sell at the call wall, buy at
+> the put wall. In negative gamma, expect momentum — breakouts and breakdowns follow through.
+> The flip level is the boundary between these two worlds.
+""")
+
+    # --- Stock GEX ---
+    with st.expander("Stock GEX — Individual Names"):
+        st.markdown("""
+The same gamma exposure analysis applied to **individual stocks**. This tab answers a critical
+question before every trade: *is the options market structure helping or hurting my trade?*
+
+**Example:** On August 21, 2026, PLTR had a call wall at \\$180 with a Breakout Risk Score of
+75/100. Attempting to buy a breakout above \\$180 failed because dealers were long gamma at
+that strike and sold into the rally. This tab would have flagged that.
+
+#### Overview Table
+A summary of all tracked symbols, sorted by Breakout Score (lowest first = most dangerous
+breakouts at the top):
+
+| Column | What It Means |
+|--------|---------------|
+| **Net GEX** | Net dealer gamma at current spot price. |
+| **Tilt** | Call/put gamma balance. >1 = call-heavy (upside capped). |
+| **Call Wall / CW Dist%** | Strongest resistance level and distance from spot. |
+| **Put Wall / PW Dist%** | Strongest support level and distance. |
+| **Wall Sign** | Gamma repriced AT the call wall. POSITIVE = wall resists. NEGATIVE = wall amplifies (rare). |
+| **BO Score** | Breakout Score (0–100). **The single number for breakout decisions.** |
+| **BO Risk Score** | Headwind magnitude only (0–100). Higher = more dangerous breakout. |
+
+#### Breakout Score Bands
+| Score | Interpretation | Action |
+|-------|----------------|--------|
+| **0–25** | Strong headwind — dealers long gamma at wall | Fade the breakout (sell into it) |
+| **25–45** | Headwind | Proceed with caution |
+| **45–55** | Gamma is not a factor | Decide purely on technicals |
+| **55–75** | Tailwind | Breakout has dealer support |
+| **75–100** | Squeeze fuel — dealers short gamma at wall | Rare — breakout could accelerate sharply |
+
+**Important:** A score of 50 means gamma has no opinion — it is *not* a green light.
+
+#### GEX Significance
+Not all gamma readings matter equally. The dashboard checks **GEX as a percentage of average
+daily volume (GEX % AVOL)** before making any behavioral claim:
+- **Below 5%** — gamma is too small to influence the stock. Decide on technicals.
+- **5–15%** — moderate. Gamma is a secondary factor.
+- **Above 15%** — strong. A gamma-driven thesis is justified.
+
+#### Alert Banners
+- **Yellow warning (Fade the Breakout)** — BO Score 25 or below. Dealers long gamma at wall.
+- **Blue info (Squeeze Watch)** — BO Score 75 or above. Dealers short gamma at wall (rare).
+
+#### Wall Sign vs. Gamma at Spot
+A common misconception: if a stock has negative gamma *at spot*, it must be easy to break out
+above the call wall. **This is wrong.** The call wall is a call-heavy strike, so as price
+approaches it, that strike's gamma goes at-the-money and often dominates. Empirically, 3 out
+of 4 net-negative names flip to *positive* gamma at their call wall. That is why the dashboard
+uses **Wall Sign** (gamma repriced at the wall) rather than the sign at spot.
+
+#### Symbol Deep Dive
+Select a symbol from the dropdown to see:
+- **AI Analysis** — interprets the stock's GEX data including day-over-day changes
+- **Spot vs GEX Levels** — price plotted against Call Wall, Put Wall, and Flip Level
+- **Wall Movement** — how walls shifted day-over-day
+- **Breakout Score History** — score over time with reference bands
+
+> **Trading tip:** Before buying any breakout, check the Stock GEX tab. If the BO Score is
+> below 25, the call wall is likely to reject the move. Wait for a pullback or a confirmed
+> close above the wall.
+""")
+
+    # --- SPY Technicals ---
+    with st.expander("SPY Technicals"):
+        st.markdown("""
+Classical technical analysis applied to SPY: trend structure, momentum (RSI), money flow (CMF),
+and order aggression.
+
+#### Key Metrics
+| Metric | What It Means |
+|--------|---------------|
+| **SPY Close** | Last closing price. |
+| **Trend** | Uptrend, Downtrend, or Transitional — from EMA crossover structure. |
+| **RSI 14 / RSI 9** | Relative Strength Index. Above 70 = overbought. Below 30 = oversold. |
+| **CMF** | Chaikin Money Flow — accumulation (+) or distribution (-). |
+
+#### Charts
+- **EMA Trend Structure** — EMA 8-20 spread (short-term) and EMA 20-200 spread (long-term). Both positive = confirmed uptrend.
+- **RSI with Divergences** — RSI-9 and RSI-14 with auto-detected divergences (green triangles = bullish, red = bearish)
+- **Chaikin Money Flow** — green bars = accumulation, red = distribution
+- **Bid/Ask Aggressor Ratio** — above 50% = buyers more aggressive
+
+> **Trading tip:** RSI divergences are among the most reliable reversal signals. A bearish
+> divergence (price makes a higher high, RSI makes a lower high) at overbought levels is a
+> strong signal to take profits or tighten stops.
+""")
+
+    # --- Glossary ---
+    st.markdown("---")
+    st.subheader("Glossary")
+    glossary = {
+        "ATR": "Average True Range — measures daily volatility in dollar terms. Used for position sizing.",
+        "Bollinger Bands": "A band drawn 2 standard deviations above and below a moving average. Prices outside the bands are statistically extreme.",
+        "Breakout": "When price moves above a resistance level. Can be genuine (follow-through) or false (fails and reverses).",
+        "CMF": "Chaikin Money Flow — accumulation/distribution indicator based on where price closes within its daily range.",
+        "COR1M": "CBOE 1-Month Implied Correlation Index — measures how correlated S&P 500 stocks are expected to be.",
+        "EMA": "Exponential Moving Average — a moving average that weights recent prices more heavily.",
+        "Gamma": "The rate of change of an option's delta. Dealer gamma determines whether hedging flows suppress or amplify price moves.",
+        "Gamma Flip": "The price level where dealer gamma switches sign — from suppressing to amplifying, or vice versa.",
+        "GEX": "Gamma Exposure — the net gamma position of options dealers, measured in dollars.",
+        "OFI": "Order Flow Imbalance — the net difference between aggressive buy and sell orders.",
+        "PCR": "Put/Call Ratio — total put volume divided by call volume. A sentiment indicator.",
+        "Pivot Points": "Price levels calculated from prior day's high, low, close. PP = central pivot, R1–R3 = resistance, S1–S3 = support.",
+        "RSI": "Relative Strength Index — momentum oscillator (0–100). Above 70 = overbought, below 30 = oversold.",
+        "VIX": "CBOE Volatility Index — the market's expectation of 30-day S&P 500 volatility.",
+        "VWAP": "Volume-Weighted Average Price — the average price weighted by volume throughout the day. Institutional benchmark.",
+        "Wall (Call/Put)": "The option strike with the most concentrated gamma. Acts as mechanical support (put wall) or resistance (call wall) due to dealer hedging.",
+        "Z-Score": "Number of standard deviations from the mean. Tells you how unusual a reading is.",
+    }
+    for term, defn in glossary.items():
+        st.markdown(f"**{term}** — {defn}")
