@@ -6,3 +6,4 @@ python-dotenv
 dropbox
 pyarrow
 numpy
+polygon-api-client

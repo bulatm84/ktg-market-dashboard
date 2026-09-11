@@ -7,7 +7,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pathlib import Path
 import os
-import requests
 
 # Load API key: check Streamlit secrets first (Cloud or local secrets.toml), then .env
 try:
@@ -179,19 +178,26 @@ def _is_rth_now():
 
 @st.cache_data(ttl=300)
 def _get_spy_quote():
-    """Fetch live SPY price for implied SPX. Returns (last, prev_close) or (None, None)."""
+    """Fetch live SPY price (including pre/post-market) for implied SPX.
+
+    Uses the Polygon options-chain endpoint — underlying_asset.price on any
+    single contract carries the live underlying, pre/post-market included.
+    Same approach the data pipeline uses in get_gex.py.
+    Returns (last, prev_close) or (None, None).
+    """
     try:
-        resp = requests.get(
-            "https://query1.finance.yahoo.com/v8/finance/chart/SPY",
-            params={"interval": "1d", "range": "2d"},
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=5,
-        )
-        data = resp.json()
-        result = data["chart"]["result"][0]
-        prev_close = float(result["meta"]["chartPreviousClose"])
-        current = float(result["meta"]["regularMarketPrice"])
-        return current, prev_close
+        from polygon import RESTClient
+        _poly_key = os.environ.get("POLYGON_API_KEY", "qvXm05LU0KVAl_1_jrJ5DFa9xDHKidnj")
+        client = RESTClient(_poly_key)
+        last = None
+        for o in client.list_snapshot_options_chain(
+                "SPY", params={"limit": 1, "order": "asc", "sort": "ticker"}):
+            last = float(o.underlying_asset.price)
+            break
+        if not last:
+            return None, None
+        prev = float(client.get_previous_close_agg("SPY")[0].close)
+        return last, prev
     except Exception:
         return None, None
 
