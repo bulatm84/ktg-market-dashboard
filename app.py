@@ -1,10 +1,13 @@
 import json
+import datetime
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pathlib import Path
 import os
+import requests
 
 # Load API key: check Streamlit secrets first (Cloud or local secrets.toml), then .env
 try:
@@ -149,7 +152,114 @@ COMMODITY_ETFS = {
 }
 
 
-import numpy as np
+# --- Stale-Spot Detection for SPX GEX ---
+def _et_now():
+    """Current time in US/Eastern. Returns (datetime, source_label)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.datetime.now(ZoneInfo("America/New_York")), "zoneinfo"
+    except Exception:
+        pass
+    try:
+        import pytz
+        return datetime.datetime.now(pytz.timezone("US/Eastern")), "pytz"
+    except Exception:
+        pass
+    return datetime.datetime.now(), "naive-local(UNVERIFIED)"
+
+
+def _is_rth_now():
+    """True if current time is within RTH (09:30-16:00 ET, weekday)."""
+    now, src = _et_now()
+    if now.weekday() >= 5:
+        return False, src
+    t = now.time()
+    return (datetime.time(9, 30) <= t < datetime.time(16, 0)), src
+
+
+@st.cache_data(ttl=300)
+def _get_spy_quote():
+    """Fetch live SPY price for implied SPX. Returns (last, prev_close) or (None, None)."""
+    try:
+        resp = requests.get(
+            "https://query1.finance.yahoo.com/v8/finance/chart/SPY",
+            params={"interval": "1d", "range": "2d"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=5,
+        )
+        data = resp.json()
+        result = data["chart"]["result"][0]
+        prev_close = float(result["meta"]["chartPreviousClose"])
+        current = float(result["meta"]["regularMarketPrice"])
+        return current, prev_close
+    except Exception:
+        return None, None
+
+
+def check_stale_spot(gex_latest):
+    """Check if the latest GEX row uses a stale SPX cash spot.
+
+    Returns a dict with:
+      stale: bool — True if the spot appears stale
+      spot_src: str — source label from the CSV, or inferred
+      implied_spot: float|None — estimated SPX from SPY gap
+      spy_gap_pct: float|None — SPY % change from prev close
+      flip: float|None — zero-gamma flip level
+      implied_regime: str|None — 'POSITIVE' or 'NEGATIVE' at implied spot
+      caveat: str — human-readable caveat for display
+    """
+    spot = gex_latest.get("Spot")
+    flip = gex_latest.get("Flip")
+    spot_src = gex_latest.get("Spot_Src", None)
+    spot_cash = gex_latest.get("Spot_Cash", None)
+    captured_preopen = gex_latest.get("Captured_PreOpen", False)
+
+    is_rth, tz_src = _is_rth_now()
+
+    # Determine if spot is stale
+    stale = False
+    if spot_src and isinstance(spot_src, str):
+        stale = "STALE" in spot_src.upper()
+    elif captured_preopen and not is_rth:
+        # No Spot_Src column yet (old data) — infer from timing
+        stale = True
+
+    if not stale:
+        src_label = spot_src if (spot_src and isinstance(spot_src, str)) else ("cash (RTH)" if is_rth else "cash")
+        return {"stale": False, "spot_src": src_label, "implied_spot": None,
+                "spy_gap_pct": None, "flip": flip, "implied_regime": None, "caveat": ""}
+
+    # Spot is stale — try to compute implied SPX from SPY
+    spy_last, spy_prev = _get_spy_quote()
+    implied_spot = None
+    spy_gap_pct = None
+    implied_regime = None
+    caveat = ""
+
+    if spy_last and spy_prev and spy_prev > 0 and pd.notna(spot):
+        spy_gap_pct = (spy_last / spy_prev - 1.0) * 100
+        implied_spot = spot * (1.0 + spy_gap_pct / 100)
+
+        if pd.notna(flip):
+            implied_regime = "POSITIVE" if implied_spot > flip else "NEGATIVE"
+            margin_pct = abs(implied_spot - flip) / implied_spot * 100
+            if margin_pct < 0.5:
+                caveat = (f"Implied SPX {implied_spot:,.0f} vs flip {flip:,.0f} "
+                          f"(only {margin_pct:.1f}% margin). Pre-market SPY is thinner "
+                          f"than cash — treat as tentative if the gap holds, not settled.")
+            else:
+                caveat = (f"Implied SPX {implied_spot:,.0f} vs flip {flip:,.0f} "
+                          f"({margin_pct:.1f}% margin). Pre-market extrapolation from SPY.")
+    else:
+        caveat = "SPX spot is the prior close (frozen outside RTH). Could not fetch live SPY to estimate."
+
+    src_label = spot_src if (spot_src and isinstance(spot_src, str)) else "cash (STALE — index frozen outside RTH)"
+    return {
+        "stale": True, "spot_src": src_label,
+        "implied_spot": implied_spot, "spy_gap_pct": spy_gap_pct,
+        "flip": flip, "implied_regime": implied_regime, "caveat": caveat,
+    }
+
 
 def find_swing_points(series, order=5):
     """Find local maxima and minima using a rolling window comparison.
@@ -311,11 +421,13 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v11 (re-generate all AI analyses with plain-English output) ---
-if "cache_cleared_v11" not in st.session_state:
-    for _f in CACHE_DIR.glob("*.txt"):
+# --- One-time cache buster v12 (stale-spot aware AI regime analysis) ---
+if "cache_cleared_v12" not in st.session_state:
+    for _f in CACHE_DIR.glob("regime_*.txt"):
         _f.unlink()
-    st.session_state["cache_cleared_v11"] = True
+    for _f in CACHE_DIR.glob("strategies_*.txt"):
+        _f.unlink()
+    st.session_state["cache_cleared_v12"] = True
 
 
 
@@ -435,6 +547,8 @@ For each recommended structure, explain:
 One paragraph on position sizing and risk given the current volatility regime. Reference VIX level and gamma environment.
 
 Use **bold** for key terms. Be specific and actionable — this is for an experienced systematic trader, not a beginner.
+
+STALE-SPOT WARNING: If a `gex_stale_spot_warning` is present in the signals data, the GEX values in the most recent row were computed at a stale SPX spot. If an `implied_regime` is provided, use that for your gamma-based strategy recommendations instead of the stale Net_Sign. State the caveat clearly.
 
 CRITICAL OUTPUT RULE — PLAIN ENGLISH ONLY:
 NEVER use raw variable names like Net_GEX_B, Gamma_Tilt, EMA_8_20, OFI_5d, CMF, R1_close, etc. in your output. Always translate to plain English that any trader would understand:
@@ -601,6 +715,8 @@ GEX DAY-OVER-DAY FIELDS — pay special attention to these:
 - **Net_Sign / Spot_vs_Flip**: Current gamma regime and whether SPX is above/below the flip level.
 
 When GEX_flip appears, lead with it — it changes everything about strategy recommendations.
+
+STALE-SPOT WARNING: If a `gex_stale_spot_warning` object is present in the data, the SPX cash index was FROZEN at the prior close when GEX was computed (the cash index does not tick outside regular trading hours). The GEX sign, regime classification, and net dollar gamma in the most recent row may be WRONG. If the warning includes an `implied_spx` (derived from SPY's pre-market gap), use THAT to assess the regime relative to the flip level, and state clearly that the regime is an estimate based on pre-market SPY. If no implied spot is available, say the gamma regime is uncertain due to the stale SPX spot and cannot be classified until the cash market opens. Do NOT confidently classify a regime shift based on stale-spot GEX.
 
 CRITICAL OUTPUT RULE — PLAIN ENGLISH ONLY:
 Your audience includes traders who may not know internal column names. NEVER use raw variable names like Net_GEX_B, Gamma_Tilt, EMA_8_20, OFI_5d, CMF, etc. in your output. Always translate to plain English:
@@ -795,10 +911,12 @@ if page == "Market Overview":
     spy_latest = spy_df.iloc[-1]
 
     # Key metrics row
+    gex_spot_src = gex_latest.get("Spot_Src", "")
+    gex_src_tag = f" [{gex_spot_src}]" if gex_spot_src and isinstance(gex_spot_src, str) and gex_spot_src != "" else ""
     st.caption(
         f"VIX: {vix_df['Date'].max().strftime('%Y-%m-%d')} | "
         f"PCR: {pcr_df['date'].max().strftime('%Y-%m-%d')} | "
-        f"GEX: {gex_df['Date'].max().strftime('%Y-%m-%d')} | "
+        f"GEX: {gex_df['Date'].max().strftime('%Y-%m-%d')}{gex_src_tag} | "
         f"Pivots: {pivot_df['date'].max().strftime('%Y-%m-%d')} | "
         f"OFI: {ofi_df['date'].max().strftime('%Y-%m-%d')}"
     )
@@ -811,6 +929,29 @@ if page == "Market Overview":
     mcols[5].metric("Adv %", f"{ad_latest['Advance_pct']:.0%}" if pd.notna(ad_latest['Advance_pct']) else "N/A")
     mcols[6].metric("RSI", f"{spy_latest['SPY_RSI_14']:.0f}" if pd.notna(spy_latest['SPY_RSI_14']) else "N/A")
     mcols[7].metric("Spread", f"{ty_latest['TY_Diff_2_30']:.2f}%")
+
+    # Stale-spot check for GEX
+    stale_info = check_stale_spot(gex_latest)
+    if stale_info["stale"]:
+        spot_val = gex_latest.get("Spot")
+        flip_val = stale_info["flip"]
+        implied = stale_info["implied_spot"]
+        if implied and stale_info["implied_regime"]:
+            regime_word = "positive gamma (volatility-suppressed)" if stale_info["implied_regime"] == "POSITIVE" else "negative gamma (volatility-amplified)"
+            banner = (
+                f"**GEX Spot Warning:** The SPX cash index is frozen at the prior close "
+                f"({spot_val:,.0f}) outside regular trading hours. Based on SPY pre-market "
+                f"({stale_info['spy_gap_pct']:+.2f}%), the implied SPX is **{implied:,.0f}**, "
+                f"which puts the regime in **{regime_word}** "
+                f"(flip level: {flip_val:,.0f}). {stale_info['caveat']}"
+            )
+        else:
+            banner = (
+                f"**GEX Spot Warning:** The SPX cash index is frozen at the prior close "
+                f"({spot_val:,.0f}) outside regular trading hours. The displayed gamma regime "
+                f"may not reflect the current pre-market move. {stale_info['caveat']}"
+            )
+        st.warning(banner)
 
     st.divider()
 
@@ -1006,6 +1147,19 @@ if page == "Market Overview":
 
     # Combine trailing signals + divergence info
     full_signals = {"trailing_5d": trailing, "rsi_divergences_30d": divergence_summary}
+    # Include stale-spot context if GEX was computed from a frozen SPX cash index
+    if stale_info["stale"]:
+        spot_warning = {
+            "warning": "SPX cash index is frozen at the prior close outside RTH. GEX values in the most recent row were computed against the stale spot.",
+            "stale_spot": gex_latest.get("Spot"),
+            "flip_level": stale_info["flip"],
+        }
+        if stale_info["implied_spot"]:
+            spot_warning["implied_spx"] = round(stale_info["implied_spot"], 0)
+            spot_warning["spy_gap_pct"] = round(stale_info["spy_gap_pct"], 2)
+            spot_warning["implied_regime"] = stale_info["implied_regime"]
+            spot_warning["caveat"] = stale_info["caveat"]
+        full_signals["gex_stale_spot_warning"] = spot_warning
     signals_json = json.dumps(full_signals, indent=2)
 
     # Fetch headlines
@@ -2303,7 +2457,33 @@ elif page == "Gamma (GEX)":
     st.title("SPX Gamma Exposure (GEX)")
     df = load_gex()
     filtered = date_filter(df, "Date")
-    st.caption(f"Last data: **{df['Date'].max().strftime('%Y-%m-%d')}**")
+
+    gex_page_latest = df.iloc[-1]
+    gex_spot_src_page = gex_page_latest.get("Spot_Src", "")
+    src_tag = f" | Spot source: {gex_spot_src_page}" if gex_spot_src_page and isinstance(gex_spot_src_page, str) else ""
+    st.caption(f"Last data: **{df['Date'].max().strftime('%Y-%m-%d')}**{src_tag}")
+
+    # Stale-spot check
+    gex_stale = check_stale_spot(gex_page_latest)
+    if gex_stale["stale"]:
+        spot_v = gex_page_latest.get("Spot")
+        impl = gex_stale["implied_spot"]
+        flip_v = gex_stale["flip"]
+        if impl and gex_stale["implied_regime"]:
+            regime_w = "**positive gamma** (volatility-suppressed, mean-reverting)" if gex_stale["implied_regime"] == "POSITIVE" else "**negative gamma** (volatility-amplified, momentum)"
+            st.warning(
+                f"**Stale Spot Warning:** SPX cash is frozen at prior close ({spot_v:,.0f}) outside RTH. "
+                f"SPY pre-market gap ({gex_stale['spy_gap_pct']:+.2f}%) implies SPX ~**{impl:,.0f}**, "
+                f"which puts the regime in {regime_w} (flip: {flip_v:,.0f}). "
+                f"The metrics and regime text below were computed at the stale spot and may be inverted. "
+                f"{gex_stale['caveat']}"
+            )
+        else:
+            st.warning(
+                f"**Stale Spot Warning:** SPX cash is frozen at prior close ({spot_v:,.0f}) outside RTH. "
+                f"The displayed gamma regime may not reflect the current pre-market move. "
+                f"{gex_stale['caveat']}"
+            )
 
     # Key Metrics
     if not filtered.empty:
