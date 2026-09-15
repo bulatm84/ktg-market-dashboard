@@ -71,6 +71,8 @@ def load_pcr():
 def load_ad():
     df = _dbx_read_csv("Advance_Decline.csv", parse_dates=["date"]) if _use_dropbox else pd.read_csv(DATA_DIR / "Advance_Decline.csv", parse_dates=["date"])
     df.sort_values("date", inplace=True)
+    df["date"] = df["date"].shift(1)
+    df = df.dropna(subset=["date"])
     return df.reset_index(drop=True)
 
 
@@ -361,12 +363,12 @@ def disk_cache_get(prefix: str, *args) -> str | None:
 
 def disk_cache_timestamp(prefix: str) -> str | None:
     """Return the last modified time of the most recent cache file for a prefix (in US Eastern)."""
-    from datetime import datetime, timezone, timedelta
     files = list(CACHE_DIR.glob(f"{prefix}_*.txt"))
     if files:
         mtime = max(f.stat().st_mtime for f in files)
-        utc_dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
-        eastern = utc_dt.astimezone(timezone(timedelta(hours=-4)))
+        utc_dt = datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc)
+        et_now, _ = _et_now()
+        eastern = utc_dt.astimezone(et_now.tzinfo)
         return eastern.strftime("%Y-%m-%d %I:%M %p ET")
     return None
 
@@ -374,11 +376,9 @@ def get_cache_date() -> str:
     """Return date key based on 8:45am ET cutoff.
     Before 8:45am ET uses yesterday's date; on/after 8:45am ET uses today's date.
     Used to ensure AI calls happen at most once per trading day."""
-    from datetime import datetime, timezone, timedelta
-    eastern = timezone(timedelta(hours=-4))
-    now = datetime.now(eastern)
+    now, _ = _et_now()
     if now.hour < 8 or (now.hour == 8 and now.minute < 45):
-        return (now - timedelta(days=1)).date().isoformat()
+        return (now - datetime.timedelta(days=1)).date().isoformat()
     return now.date().isoformat()
 
 
@@ -391,9 +391,7 @@ def disk_cache_set(prefix: str, result: str, *args):
 
 def check_scheduled_cache_clear():
     """Clear ALL caches at 8:45 AM ET on weekdays so data + AI analysis refresh."""
-    from datetime import datetime, timezone, timedelta
-    eastern = timezone(timedelta(hours=-4))
-    now = datetime.now(eastern)
+    now, _ = _et_now()
     today_et = now.date().isoformat()
     # Only on weekdays (Mon=0 to Fri=4)
     if now.weekday() > 4:
@@ -427,13 +425,13 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v13 (signal audit: state vs descriptive split, 60d context) ---
-if "cache_cleared_v13" not in st.session_state:
+# --- One-time cache buster v14 (fix Adv_pct dating, spy_gap is_premarket, pivot text, DST) ---
+if "cache_cleared_v14" not in st.session_state:
     for _f in CACHE_DIR.glob("regime_*.txt"):
         _f.unlink()
     for _f in CACHE_DIR.glob("strategies_*.txt"):
         _f.unlink()
-    st.session_state["cache_cleared_v13"] = True
+    st.session_state["cache_cleared_v14"] = True
 
 
 
@@ -522,7 +520,7 @@ Based on the regime summary above, recommend the specific stock strategy:
 - **Directional Short / Breakdown** — if breadth is deteriorating, EMA structure is bearish, gamma is negative, and VIX is rising
 - **Sit Out / Reduce Size** — if signals are deeply conflicting with no clear edge
 
-If a **spy_gap** block is present, the SPY pre-market gap is the strongest open-knowable tilt for today's session. Gap-down days have ~9 pts higher R1 failure rate than gap-up days — use the gap direction to tilt fade vs breakout for today specifically.
+If a **spy_gap** block is present and `is_premarket` is true, the SPY pre-market gap is the strongest open-knowable tilt for today's session. Gap-down days have ~9 pts higher R1 failure rate than gap-up days — use the gap direction to tilt fade vs breakout for today specifically. If `is_premarket` is false, the value is intraday price progress, not the opening gap — do NOT use it as the fade/breakout tilt.
 
 Explain WHY with specific state signal references. Include entry/exit guidance.
 
@@ -716,9 +714,7 @@ Recent Headlines:
 SIGNAL STRUCTURE — READ THIS FIRST:
 Each day's data is split into two groups:
 - **"state"**: Persistent regime signals (VIX, COR1M, EMA structure, RSI, CMF, GEX, PCR, OR range, EMA breadth, treasury yields). These have high day-to-day autocorrelation (0.45–1.0) and define the regime. Use these for classification and forward-looking calls.
-- **"descriptive"**: Same-day description of what happened (R1/S1/PP pivot breadth, VWAP deviation, advance/decline %, intraday return, sector returns, OFI). These have near-zero day-to-day persistence (lag-1 autocorr ≈ 0.05). Use them to characterise recent sessions, NEVER to classify the current regime or to choose breakout vs mean-reversion. Yesterday's R1 failure rate tells you nothing about today's.
-
-**Adv_pct_prev_day** is dated one day late by construction (the shared CSV carries the prior day's breadth). The value shown on date D is actually D−1's breadth.
+- **"descriptive"**: Same-day description of what happened (R1/S1/PP pivot breadth, VWAP deviation, advance %, intraday return, sector returns, OFI). These have near-zero day-to-day persistence (lag-1 autocorr ≈ 0.05). Use them to characterise recent sessions, NEVER to classify the current regime or to choose breakout vs mean-reversion. Yesterday's R1 failure rate tells you nothing about today's.
 
 A **signal_context_60d** block provides 60-day mean, standard deviation, and current percentile for key state signals. Use it to say "elevated" or "depressed" with a measured basis — do not eyeball from five rows.
 
@@ -731,7 +727,7 @@ Analyze both the CURRENT state and the TRAJECTORY over the past 5 days. Specific
 3. **Trajectory & momentum** — Are conditions improving, deteriorating, or stable? Reference the 60-day percentiles to anchor "elevated" or "depressed". Connect moves to macro catalysts where applicable.
 4. **Divergences & risks** — Any indicators moving in opposite directions? Any headline risks not yet reflected in the quantitative data?
 
-If a **spy_gap** block is present, the SPY pre-market gap is the strongest open-knowable tilt for today's session direction. Mention it.
+If a **spy_gap** block is present and `is_premarket` is true, the SPY pre-market gap is the strongest open-knowable tilt for today's session direction. Mention it. If `is_premarket` is false, it is intraday progress, not the opening gap — do not use it as a fade/breakout tilt.
 
 GEX DAY-OVER-DAY FIELDS — pay special attention to these:
 - **GEX_flip**: "FLIPPED_POSITIVE" or "FLIPPED_NEGATIVE" means net gamma exposure crossed zero from the prior day — this is a MAJOR regime shift.
@@ -1034,7 +1030,7 @@ if page == "Market Overview":
             st_sig["PCR_z"] = safe_round(p["PCR_z_score"], 2)
         a = ad_by_date.get(d)
         if a is not None:
-            desc["Adv_pct_prev_day"] = safe_round(a["Advance_pct"], 3)
+            desc["Adv_pct"] = safe_round(a["Advance_pct"], 3)
             st_sig["AD_z5"] = safe_round(a["AD_z_score_5"], 2)
         t = ty_by_date.get(d)
         if t is not None:
@@ -1202,6 +1198,9 @@ if page == "Market Overview":
         spy_gap_info["spy_gap_pct"] = round((spy_last / spy_prev - 1) * 100, 2)
         spy_gap_info["spy_last"] = round(spy_last, 2)
         spy_gap_info["spy_prev_close"] = round(spy_prev, 2)
+        et_now, _ = _et_now()
+        spy_gap_info["captured_at_et"] = et_now.strftime("%H:%M")
+        spy_gap_info["is_premarket"] = et_now.hour < 9 or (et_now.hour == 9 and et_now.minute < 30)
 
     # Combine trailing signals + divergence info
     full_signals = {"trailing_5d": trailing, "rsi_divergences_30d": divergence_summary}
@@ -2218,19 +2217,19 @@ elif page == "Pivot Breadth":
             else:
                 lines.append(f"Only **{pp_close:.0%}** closing above pivot -- a **broad failure day**. Very few breakouts are holding, indicating sellers are dominant. This is a regime where fade and mean-reversion strategies outperform breakout strategies.")
 
-        # R1 failure rate context
+        # R1 failure rate context (same-day descriptor, no carry)
         if pd.notna(rr1_fail):
             if rr1_fail > 0.6:
-                lines.append(f"R1 failure rate at **{rr1_fail:.0%}** is high -- most stocks that touch first resistance are getting rejected. This is a **fade-friendly regime**. Breakout traders should tighten stops or reduce size; mean-reversion setups at resistance levels have higher edge.")
+                lines.append(f"R1 failure rate at **{rr1_fail:.0%}** is high -- most stocks that touched first resistance today got rejected. This describes today's session character, not a persistent regime. Tomorrow's R1 failure rate is essentially independent of today's (lag-1 autocorrelation ~0.05).")
             elif rr1_fail < 0.4:
-                lines.append(f"R1 failure rate at **{rr1_fail:.0%}** is low -- breakouts through first resistance are **sticking**. This is the ideal regime for momentum and breakout strategies. Stocks clearing R1 have follow-through, suggesting strong conviction buying.")
+                lines.append(f"R1 failure rate at **{rr1_fail:.0%}** is low -- breakouts through first resistance held today. This is a same-day description of strong conviction buying, not a signal that carries into tomorrow.")
 
-        # S1 breakdown context
+        # S1 breakdown context (same-day descriptor, no carry)
         if pd.notna(ss1_fail) and pd.notna(ss1_close):
             if ss1_close > 0.2 and ss1_fail < 0.4:
-                lines.append(f"S1 breakdowns are holding ({ss1_fail:.0%} failure rate) -- **support is breaking**. Downside momentum is real; consider short setups or tighter stop-losses on longs.")
+                lines.append(f"S1 breakdowns held today ({ss1_fail:.0%} failure rate) -- support broke in this session. This is a same-day reading; it does not predict tomorrow's support behavior.")
             elif ss1_fail > 0.6:
-                lines.append(f"S1 breakdown failure rate at **{ss1_fail:.0%}** means stocks are **bouncing off support**. Buyers are defending key levels, which is constructive for the bull case.")
+                lines.append(f"S1 breakdown failure rate at **{ss1_fail:.0%}** means stocks bounced off support today. Buyers defended levels in this session, but this reading has no carry to tomorrow.")
 
         st.info("\n\n".join(lines))
 
@@ -3429,15 +3428,16 @@ This tab shows what percentage of S&P 500 stocks are breaking through or failing
 | **Failed S1** | % that hit S1 but recovered — measures support quality. |
 
 #### Key Charts
-- **Breakout vs Fade Regime (R1)** — compares breakout-hold rate vs. failure rate
+- **Breakout vs Fade (R1)** — compares breakout-hold rate vs. failure rate (same-day descriptor, no carry)
 - **% of S&P 500 Above EMAs** — percentage above 5, 8, 20, 50, and 200-day EMAs
 
 #### Sidebar Controls
 - **Moving Average** dropdown: smooth with 5d, 10d (default), or 20d MA
 - **View Mode**: Resistance, Support, or Both
 
-> **Trading tip:** High R1 failure rates + negative gamma (from GEX tab) = classic
-> mean-reversion environment. Low R1 failure rates + positive breadth = breakout environment.
+> **Note:** R1/S1 failure rates describe what happened in a single session (lag-1 autocorrelation ~0.05).
+> They do not carry forward — yesterday's R1 failure rate tells you nothing about today's. Use persistent
+> state signals (VIX, EMA structure, GEX, COR1M) for regime classification, not pivot breadth.
 """)
 
     # --- Order Flow ---
