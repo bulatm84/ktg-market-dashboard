@@ -425,13 +425,13 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v14 (fix Adv_pct dating, spy_gap is_premarket, pivot text, DST) ---
-if "cache_cleared_v14" not in st.session_state:
+# --- One-time cache buster v15 (prompt: never expose field names like is_premarket) ---
+if "cache_cleared_v15" not in st.session_state:
     for _f in CACHE_DIR.glob("regime_*.txt"):
         _f.unlink()
     for _f in CACHE_DIR.glob("strategies_*.txt"):
         _f.unlink()
-    st.session_state["cache_cleared_v14"] = True
+    st.session_state["cache_cleared_v15"] = True
 
 
 
@@ -520,7 +520,7 @@ Based on the regime summary above, recommend the specific stock strategy:
 - **Directional Short / Breakdown** — if breadth is deteriorating, EMA structure is bearish, gamma is negative, and VIX is rising
 - **Sit Out / Reduce Size** — if signals are deeply conflicting with no clear edge
 
-If a **spy_gap** block is present and `is_premarket` is true, the SPY pre-market gap is the strongest open-knowable tilt for today's session. Gap-down days have ~9 pts higher R1 failure rate than gap-up days — use the gap direction to tilt fade vs breakout for today specifically. If `is_premarket` is false, the value is intraday price progress, not the opening gap — do NOT use it as the fade/breakout tilt.
+If a **spy_gap** block is present and its is_premarket field is true, the gap percentage is the pre-market opening gap — the strongest open-knowable tilt for today. Gap-down days have ~9 pts higher R1 failure rate than gap-up days; use the gap direction to tilt fade vs breakout. If is_premarket is false, the price is an intraday reading, not the opening gap — silently ignore it for fade/breakout tilting. Never mention field names like "is_premarket" or "captured_at_et" in your output.
 
 Explain WHY with specific state signal references. Include entry/exit guidance.
 
@@ -566,13 +566,17 @@ Use **bold** for key terms. Be specific and actionable — this is for an experi
 STALE-SPOT WARNING: If a `gex_stale_spot_warning` is present, GEX values in the most recent row were computed at a stale SPX spot. Use `implied_regime` if provided. State the caveat clearly.
 
 CRITICAL OUTPUT RULE — PLAIN ENGLISH ONLY:
-NEVER use raw variable names. Always translate:
+NEVER use raw variable names or JSON field names in your output. Always translate:
 - Net_GEX_B → "net gamma exposure" or "dealer gamma"
 - Gamma_Tilt → "call/put gamma balance"
 - EMA_8_20 / EMA_20_200 → "short-term trend (8/20 EMA)" / "long-term trend (20/200 EMA)"
 - CMF → "money flow"
 - COR1M → "1-month implied correlation"
 - OR_range → "opening range"
+- spy_gap_pct → "SPY pre-market gap" or "SPY gap"
+- is_premarket / captured_at_et → never mention these; use them internally only
+- Adv_pct → "advance %" or "breadth"
+- AD_z5 → "breadth z-score"
 Use actual values and numbers, described in terms any trader would understand.
 
 5-Day Trailing Market Signals:
@@ -727,7 +731,7 @@ Analyze both the CURRENT state and the TRAJECTORY over the past 5 days. Specific
 3. **Trajectory & momentum** — Are conditions improving, deteriorating, or stable? Reference the 60-day percentiles to anchor "elevated" or "depressed". Connect moves to macro catalysts where applicable.
 4. **Divergences & risks** — Any indicators moving in opposite directions? Any headline risks not yet reflected in the quantitative data?
 
-If a **spy_gap** block is present and `is_premarket` is true, the SPY pre-market gap is the strongest open-knowable tilt for today's session direction. Mention it. If `is_premarket` is false, it is intraday progress, not the opening gap — do not use it as a fade/breakout tilt.
+If a **spy_gap** block is present and its is_premarket field is true, the gap percentage is the pre-market opening gap — the strongest open-knowable tilt for today's session direction. Mention the gap size and direction in plain language. If is_premarket is false, the price is an intraday reading — silently ignore it for session-direction calls. Never mention field names like "is_premarket" or "captured_at_et" in your output.
 
 GEX DAY-OVER-DAY FIELDS — pay special attention to these:
 - **GEX_flip**: "FLIPPED_POSITIVE" or "FLIPPED_NEGATIVE" means net gamma exposure crossed zero from the prior day — this is a MAJOR regime shift.
@@ -741,13 +745,17 @@ When GEX_flip appears, lead with it — it changes everything about strategy rec
 STALE-SPOT WARNING: If a `gex_stale_spot_warning` object is present in the data, the SPX cash index was FROZEN at the prior close when GEX was computed. The GEX sign and regime in the most recent row may be WRONG. If the warning includes an `implied_spx`, use THAT to assess regime. Otherwise say the gamma regime is uncertain until the cash market opens.
 
 CRITICAL OUTPUT RULE — PLAIN ENGLISH ONLY:
-NEVER use raw variable names. Always translate:
+NEVER use raw variable names or JSON field names in your output. Always translate:
 - Net_GEX_B → "net gamma exposure" or "dealer gamma"
 - Gamma_Tilt → "call/put gamma balance"
 - EMA_8_20 / EMA_20_200 → "short-term trend (8/20 EMA)" / "long-term trend (20/200 EMA)"
 - CMF → "money flow"
 - OR_range → "opening range"
 - COR1M → "1-month implied correlation"
+- spy_gap_pct → "SPY pre-market gap" or "SPY gap"
+- is_premarket / captured_at_et → never mention these; use them internally only
+- Adv_pct → "advance %" or "breadth"
+- AD_z5 → "breadth z-score"
 Use actual values and numbers, described in terms any trader would understand.
 
 Keep it concise (4-5 paragraphs). Use **bold** for key terms. Be direct and actionable.
