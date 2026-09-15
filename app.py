@@ -427,13 +427,13 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v12 (stale-spot aware AI regime analysis) ---
-if "cache_cleared_v12" not in st.session_state:
+# --- One-time cache buster v13 (signal audit: state vs descriptive split, 60d context) ---
+if "cache_cleared_v13" not in st.session_state:
     for _f in CACHE_DIR.glob("regime_*.txt"):
         _f.unlink()
     for _f in CACHE_DIR.glob("strategies_*.txt"):
         _f.unlink()
-    st.session_state["cache_cleared_v12"] = True
+    st.session_state["cache_cleared_v13"] = True
 
 
 
@@ -477,7 +477,16 @@ def get_ai_strategy_recommendations(signals_json: str, regime_summary: str = "")
             "role": "user",
             "content": f"""You are a senior systematic trading strategist specializing in SPY equity and options strategies. Based on the 5-day trailing market signals below, provide specific, actionable strategy recommendations.
 
-CRITICAL: The regime summary below has ALREADY been generated and presented to the user. Your strategy recommendations MUST be consistent with this regime classification. Do NOT contradict it. If the regime says "breakout favored", your stock strategies must recommend breakouts. If it says "mean-reversion", recommend fades. Build on the regime analysis, don't re-analyze from scratch.
+CRITICAL: The regime summary below has ALREADY been generated and presented to the user. Your strategy recommendations MUST be consistent with this regime classification. Do NOT contradict it. Build on the regime analysis, don't re-analyze from scratch.
+
+SIGNAL STRUCTURE — READ THIS FIRST:
+Each day's data is split into two groups:
+- **"state"**: Persistent regime signals (VIX, COR1M, EMA structure, RSI, CMF, GEX, PCR, OR range, EMA breadth, yields). High autocorrelation — these define the regime.
+- **"descriptive"**: Same-day description (R1/S1/PP pivot breadth, VWAP dev, advance %, intraday return, sector returns, OFI). Near-zero day-to-day persistence. Use to characterise recent sessions, NEVER to choose breakout vs mean-reversion or classify the regime. Yesterday's R1 failure rate tells you nothing about today's.
+
+A **signal_context_60d** block provides 60-day mean, SD, and percentile for key state signals. Use it to anchor "elevated" or "depressed" — do not eyeball from five rows.
+
+LATEST-ROW OVERRIDE: If a state signal has reverted in the most recent row, that reversion overrides the 5-day average.
 
 REGIME SUMMARY (already shown to user — align with this):
 {regime_summary}
@@ -489,48 +498,50 @@ Structure your response EXACTLY as follows:
 Classify the current environment as one of:
 
 **SWING TRADING REGIME** — conditions favor multi-day holds. Criteria:
-- A large percentage of stocks are closing above their R1 pivot levels (R1_close > ~0.25) consistently over the trailing window
-- The broader market is trending in the same direction (EMA_8_20 and EMA_20_200 both positive or both negative, RSI confirming)
-- Intraday reversals are NOT dominant (R1 failure rate is moderate/low)
-- Breadth is expanding (pct_above_EMA20 and pct_above_EMA50 rising)
+- The broader market is trending (EMA 8/20 and 20/200 both positive or both negative, RSI confirming)
+- Breadth is expanding (% above EMA20 and EMA50 rising)
+- VIX is moderate or declining (not spiking)
+- Gamma is positive (dealers suppress pullbacks, supporting holds)
 
 **DAY TRADING REGIME** — conditions favor intraday strategies only. Criteria:
-- Intraday moves are large (OR_range elevated, intra_return_total volatile, VWAP_dev large)
-- But overnight/multi-day holds are risky because the market is NOT trending (conflicting EMA signals, high R1/S1 failure rates, breadth choppy)
-- Elevated VIX with positive gamma (dealers capping moves) creates large intraday ranges that mean-revert
+- Expected range is wide (VIX elevated, COR1M high, OR range expanding)
+- But overnight/multi-day holds are risky because the market is NOT trending (conflicting EMA signals, breadth choppy)
+- Elevated VIX with positive gamma creates large intraday ranges that mean-revert
 
 **NEUTRAL / NO CLEAR EDGE** — neither style has a strong edge. Low volatility, tight ranges, no clear trend or intraday opportunity. Reduce size and wait for clearer signals.
 
-State which regime applies, explain WHY with specific signal references from the trailing window, and note what would cause a SHIFT to a different regime. Bold the regime classification.
+State which regime applies, explain WHY with specific state signal references, and note what would cause a SHIFT. Bold the regime classification.
 
 ---
 
 ## STOCK STRATEGIES
 
-Based on the regime summary above, recommend the specific stock strategy that fits:
-- **Breakout** — if breadth is expanding, pivot breakouts are holding (low R1 failure rate), OFI is positive, and EMA structure is bullish
-- **Mean-Reversion / Fade** — if VIX is elevated, R1 failure rate is high, gamma is positive (dealers suppressing moves), and breadth is mixed
-- **Directional Short / Breakdown** — if breadth is deteriorating, support breakdowns are holding (low S1 failure rate), OFI is negative, gamma is negative
+Based on the regime summary above, recommend the specific stock strategy:
+- **Breakout** — if breadth is expanding (% above EMA20/50 rising), EMA structure is bullish, VIX is low/declining, and gamma is negative (dealers amplify moves)
+- **Mean-Reversion / Fade** — if VIX is elevated, gamma is positive (dealers suppress moves), COR1M is high, and expected range is wide
+- **Directional Short / Breakdown** — if breadth is deteriorating, EMA structure is bearish, gamma is negative, and VIX is rising
 - **Sit Out / Reduce Size** — if signals are deeply conflicting with no clear edge
 
-Explain WHY this regime is favored with specific signal references. Include entry/exit guidance.
+If a **spy_gap** block is present, the SPY pre-market gap is the strongest open-knowable tilt for today's session. Gap-down days have ~9 pts higher R1 failure rate than gap-up days — use the gap direction to tilt fade vs breakout for today specifically.
+
+Explain WHY with specific state signal references. Include entry/exit guidance.
 
 ---
 
 ## OPTIONS STRATEGIES
 
 Consider the INTERACTION between these factors:
-1. **IV Environment**: VIX level and z-scores tell you if options are cheap or expensive
-2. **Directional Bias**: OFI, breadth, EMA structure tell you the likely direction
-3. **Gamma Environment**: Positive gamma = mean-reversion (sell premium), negative gamma = momentum (buy premium for directional). Check GEX_flip — if gamma just flipped sign, the prior day's strategy may be obsolete.
-4. **Breakout/Breakdown Quality**: Pivot breadth failure rates tell you if directional moves stick
+1. **IV Environment**: VIX level and z-scores (use 60-day percentile) tell you if options are cheap or expensive
+2. **Directional Bias**: EMA structure, breadth trajectory, money flow tell you the likely direction
+3. **Gamma Environment**: Positive gamma = mean-reversion (sell premium), negative gamma = momentum (buy premium). Check GEX_flip — if gamma just flipped sign, the prior day's strategy may be obsolete.
+4. **Expected Range**: VIX, COR1M, OR range trend tell you how big tomorrow's move is likely to be
 
 Based on the interaction, recommend specific options structures:
 
-**High IV + Mean-Reversion Regime (positive gamma, high R1 failure)**:
+**High IV + Mean-Reversion Regime (positive gamma, wide expected range)**:
 → Sell premium: iron condors, strangles, butterflies, credit spreads
 
-**High IV + Directional Regime (negative gamma, breakouts/breakdowns working)**:
+**High IV + Directional Regime (negative gamma, trending EMA)**:
 → If bullish: bull put spreads (credit), call debit spreads
 → If bearish: bear call spreads (credit), put debit spreads
 
@@ -543,32 +554,28 @@ Based on the interaction, recommend specific options structures:
 For each recommended structure, explain:
 - Why THIS structure fits the current regime
 - Suggested tenor (weeklies vs monthlies based on VIX term structure)
-- Strike selection guidance relative to hedge wall and pivot levels
+- Strike selection guidance relative to GEX call/put walls
 - Key risk to watch that would invalidate the trade
 
 ---
 
 ## RISK MANAGEMENT
 
-One paragraph on position sizing and risk given the current volatility regime. Reference VIX level and gamma environment.
+One paragraph on position sizing and risk given the current volatility regime. Reference VIX level (with 60-day percentile) and gamma environment.
 
 Use **bold** for key terms. Be specific and actionable — this is for an experienced systematic trader, not a beginner.
 
-STALE-SPOT WARNING: If a `gex_stale_spot_warning` is present in the signals data, the GEX values in the most recent row were computed at a stale SPX spot. If an `implied_regime` is provided, use that for your gamma-based strategy recommendations instead of the stale Net_Sign. State the caveat clearly.
+STALE-SPOT WARNING: If a `gex_stale_spot_warning` is present, GEX values in the most recent row were computed at a stale SPX spot. Use `implied_regime` if provided. State the caveat clearly.
 
 CRITICAL OUTPUT RULE — PLAIN ENGLISH ONLY:
-NEVER use raw variable names like Net_GEX_B, Gamma_Tilt, EMA_8_20, OFI_5d, CMF, R1_close, etc. in your output. Always translate to plain English that any trader would understand:
+NEVER use raw variable names. Always translate:
 - Net_GEX_B → "net gamma exposure" or "dealer gamma"
 - Gamma_Tilt → "call/put gamma balance"
-- GEX_flip → "gamma flipped positive/negative"
 - EMA_8_20 / EMA_20_200 → "short-term trend (8/20 EMA)" / "long-term trend (20/200 EMA)"
-- OFI_5d → "order flow" or "net buying/selling pressure"
 - CMF → "money flow"
-- R1_close / S1_close → "stocks closing above resistance" / "stocks closing below support"
-- pct_above_EMA20/50 → "% of stocks above their 20/50-day moving average"
+- COR1M → "1-month implied correlation"
 - OR_range → "opening range"
-- VWAP_dev → "deviation from VWAP"
-Use actual values and numbers, just describe them in terms any trader would understand.
+Use actual values and numbers, described in terms any trader would understand.
 
 5-Day Trailing Market Signals:
 {signals_json}"""
@@ -706,42 +713,48 @@ Recent Headlines:
             "role": "user",
             "content": f"""You are a senior systematic trading strategist. Below is a 5-day trailing window of cross-market signals (oldest to newest). The last entry is the most recent day.
 
+SIGNAL STRUCTURE — READ THIS FIRST:
+Each day's data is split into two groups:
+- **"state"**: Persistent regime signals (VIX, COR1M, EMA structure, RSI, CMF, GEX, PCR, OR range, EMA breadth, treasury yields). These have high day-to-day autocorrelation (0.45–1.0) and define the regime. Use these for classification and forward-looking calls.
+- **"descriptive"**: Same-day description of what happened (R1/S1/PP pivot breadth, VWAP deviation, advance/decline %, intraday return, sector returns, OFI). These have near-zero day-to-day persistence (lag-1 autocorr ≈ 0.05). Use them to characterise recent sessions, NEVER to classify the current regime or to choose breakout vs mean-reversion. Yesterday's R1 failure rate tells you nothing about today's.
+
+**Adv_pct_prev_day** is dated one day late by construction (the shared CSV carries the prior day's breadth). The value shown on date D is actually D−1's breadth.
+
+A **signal_context_60d** block provides 60-day mean, standard deviation, and current percentile for key state signals. Use it to say "elevated" or "depressed" with a measured basis — do not eyeball from five rows.
+
+LATEST-ROW OVERRIDE: If a state signal has reverted in the most recent row (moved back toward its 60-day mean), that reversion overrides the 5-day average. A 5-day average can be elevated even when the signal has already normalised — the most recent value is the current state.
+
 Analyze both the CURRENT state and the TRAJECTORY over the past 5 days. Specifically:
 
-1. **Regime classification** — What is the current market regime (risk-on, risk-off, transitional)? Has the regime SHIFTED over the past 5 days, and in which direction? If headlines provide context for WHY, explain the catalyst.
-2. **Strategy implications** — Are breakout or mean-reversion strategies favored? Has this changed from earlier in the window? Do current headlines suggest this will persist or shift?
-3. **Trajectory & momentum** — Are conditions improving, deteriorating, or stable? Highlight any signals that are trending in a clear direction. Connect moves to macro catalysts where applicable.
+1. **Regime classification** — What is the current market regime (risk-on, risk-off, transitional)? Base this on the persistent state signals: VIX level + z-score, COR1M, EMA 8/20 and 20/200 structure, RSI, CMF, GEX sign/flip distance, and EMA breadth. Has the regime SHIFTED over the past 5 days? If headlines provide context for WHY, explain the catalyst.
+2. **Expected range** — Is tomorrow's range likely to be wide or narrow? Use VIX, COR1M, OR range trend, and GEX sign as the honest read. Do NOT use pivot breadth failure rates for this.
+3. **Trajectory & momentum** — Are conditions improving, deteriorating, or stable? Reference the 60-day percentiles to anchor "elevated" or "depressed". Connect moves to macro catalysts where applicable.
 4. **Divergences & risks** — Any indicators moving in opposite directions? Any headline risks not yet reflected in the quantitative data?
 
+If a **spy_gap** block is present, the SPY pre-market gap is the strongest open-knowable tilt for today's session direction. Mention it.
+
 GEX DAY-OVER-DAY FIELDS — pay special attention to these:
-- **GEX_flip**: "FLIPPED_POSITIVE" or "FLIPPED_NEGATIVE" means net gamma exposure crossed zero from the prior day — this is a MAJOR regime shift. A flip to positive means dealers shifted from amplifying to suppressing volatility; a flip to negative means the opposite.
-- **Net_GEX_norm_chg / Net_GEX_B_chg**: Day-over-day change in gamma exposure. Large moves signal rapid repositioning by options dealers.
-- **Gamma_Tilt_chg**: Shift in call/put gamma balance. Rising tilt = increasing call-side hedging (ceiling effect), falling tilt = increasing put-side hedging (acceleration risk).
-- **Flip_Dist_pct_chg**: Change in distance to the gamma flip level. Shrinking distance = approaching a regime change.
+- **GEX_flip**: "FLIPPED_POSITIVE" or "FLIPPED_NEGATIVE" means net gamma exposure crossed zero from the prior day — this is a MAJOR regime shift.
+- **Net_GEX_norm_chg / Net_GEX_B_chg**: Day-over-day change in gamma exposure.
+- **Gamma_Tilt_chg**: Shift in call/put gamma balance.
+- **Flip_Dist_pct_chg**: Change in distance to the gamma flip level.
 - **Net_Sign / Spot_vs_Flip**: Current gamma regime and whether SPX is above/below the flip level.
 
 When GEX_flip appears, lead with it — it changes everything about strategy recommendations.
 
-STALE-SPOT WARNING: If a `gex_stale_spot_warning` object is present in the data, the SPX cash index was FROZEN at the prior close when GEX was computed (the cash index does not tick outside regular trading hours). The GEX sign, regime classification, and net dollar gamma in the most recent row may be WRONG. If the warning includes an `implied_spx` (derived from SPY's pre-market gap), use THAT to assess the regime relative to the flip level, and state clearly that the regime is an estimate based on pre-market SPY. If no implied spot is available, say the gamma regime is uncertain due to the stale SPX spot and cannot be classified until the cash market opens. Do NOT confidently classify a regime shift based on stale-spot GEX.
+STALE-SPOT WARNING: If a `gex_stale_spot_warning` object is present in the data, the SPX cash index was FROZEN at the prior close when GEX was computed. The GEX sign and regime in the most recent row may be WRONG. If the warning includes an `implied_spx`, use THAT to assess regime. Otherwise say the gamma regime is uncertain until the cash market opens.
 
 CRITICAL OUTPUT RULE — PLAIN ENGLISH ONLY:
-Your audience includes traders who may not know internal column names. NEVER use raw variable names like Net_GEX_B, Gamma_Tilt, EMA_8_20, OFI_5d, CMF, etc. in your output. Always translate to plain English:
-- Net_GEX_B / Net_GEX_norm → "net gamma exposure" or "dealer gamma"
-- Gamma_Tilt → "call/put gamma balance" or "gamma tilt toward calls/puts"
-- Net_Sign → "positive gamma" or "negative gamma"
-- GEX_flip → "gamma flipped positive/negative"
-- Flip_Dist_pct → "distance to the gamma flip level"
-- EMA_8_20 / EMA_20_200 → "short-term trend" / "long-term trend" or "8/20 EMA crossover"
-- OFI_5d → "order flow" or "net buying/selling pressure"
-- CMF → "money flow" or "Chaikin money flow"
-- RealVol_20d → "realized volatility"
-- pct_above_EMA20/50/200 → "% of stocks above their 20/50/200-day moving average"
-- R1_close / S1_close → "stocks closing above resistance" / "stocks closing below support"
+NEVER use raw variable names. Always translate:
+- Net_GEX_B → "net gamma exposure" or "dealer gamma"
+- Gamma_Tilt → "call/put gamma balance"
+- EMA_8_20 / EMA_20_200 → "short-term trend (8/20 EMA)" / "long-term trend (20/200 EMA)"
+- CMF → "money flow"
 - OR_range → "opening range"
-- VWAP_dev → "deviation from VWAP"
-Use the actual values and numbers, just describe them in terms any trader would understand.
+- COR1M → "1-month implied correlation"
+Use actual values and numbers, described in terms any trader would understand.
 
-Keep it concise (4-5 paragraphs). Use **bold** for key terms. Be direct and actionable. When discussing shifts, reference specific day-over-day changes and connect to catalysts.
+Keep it concise (4-5 paragraphs). Use **bold** for key terms. Be direct and actionable.
 
 5-Day Trailing Market Signals (oldest → newest):
 {signals_json}{headlines_section}"""
@@ -999,110 +1012,110 @@ if page == "Market Overview":
 
     trailing = OrderedDict()
     for d in all_dates:
-        s = {}
+        st_sig = {}   # persistent state signals (regime-defining)
+        desc = {}     # same-day descriptive (no day-to-day persistence)
         prev_date = gex_prev_map.get(d)
         v = vix_by_date.get(d)
         if v is not None:
-            s["VIX"] = safe_round(v["VIX_Close"], 2)
-            s["VIX_z10"] = safe_round(v["VIX_z_score_10"], 2)
-            s["VIX_z20"] = safe_round(v["VIX_z_score_20"], 2)
-            s["VIX_60d_ratio"] = safe_round(v["VIX_60d_ratio"], 3)
-            s["VIX_pct_chg"] = safe_round(v["VIX_Pct_Chg"], 4)
+            st_sig["VIX"] = safe_round(v["VIX_Close"], 2)
+            st_sig["VIX_z10"] = safe_round(v["VIX_z_score_10"], 2)
+            st_sig["VIX_z20"] = safe_round(v["VIX_z_score_20"], 2)
+            st_sig["VIX_60d_ratio"] = safe_round(v["VIX_60d_ratio"], 3)
+            st_sig["VIX_pct_chg"] = safe_round(v["VIX_Pct_Chg"], 4)
             cor1m = v.get("COR1M")
             if pd.notna(cor1m):
-                s["COR1M"] = safe_round(cor1m, 2)
-                s["COR1M_z10"] = safe_round(v.get("COR1M_z_score_10"), 2)
-                s["COR1M_z20"] = safe_round(v.get("COR1M_z_score_20"), 2)
-                s["COR1M_VIX_ratio"] = safe_round(v.get("COR1M_VIX_ratio"), 3)
+                st_sig["COR1M"] = safe_round(cor1m, 2)
+                st_sig["COR1M_z10"] = safe_round(v.get("COR1M_z_score_10"), 2)
+                st_sig["COR1M_z20"] = safe_round(v.get("COR1M_z_score_20"), 2)
+                st_sig["COR1M_VIX_ratio"] = safe_round(v.get("COR1M_VIX_ratio"), 3)
         p = pcr_by_date.get(d)
         if p is not None:
-            s["PCR"] = safe_round(p["PCR"], 3)
-            s["PCR_z"] = safe_round(p["PCR_z_score"], 2)
+            st_sig["PCR"] = safe_round(p["PCR"], 3)
+            st_sig["PCR_z"] = safe_round(p["PCR_z_score"], 2)
         a = ad_by_date.get(d)
         if a is not None:
-            s["Adv_pct"] = safe_round(a["Advance_pct"], 3)
-            s["AD_z5"] = safe_round(a["AD_z_score_5"], 2)
+            desc["Adv_pct_prev_day"] = safe_round(a["Advance_pct"], 3)
+            st_sig["AD_z5"] = safe_round(a["AD_z_score_5"], 2)
         t = ty_by_date.get(d)
         if t is not None:
-            s["TY_2Y"] = safe_round(t["DGS2_1"], 2)
-            s["TY_30Y"] = safe_round(t["DGS30_1"], 2)
-            s["TY_spread"] = safe_round(t["TY_Diff_2_30"], 2)
-            s["TY_spread_5d_chg"] = safe_round(t.get("TY_Diff_Chg_5"), 4)
+            st_sig["TY_2Y"] = safe_round(t["DGS2_1"], 2)
+            st_sig["TY_30Y"] = safe_round(t["DGS30_1"], 2)
+            st_sig["TY_spread"] = safe_round(t["TY_Diff_2_30"], 2)
+            st_sig["TY_spread_5d_chg"] = safe_round(t.get("TY_Diff_Chg_5"), 4)
         pv = piv_by_date.get(d)
         if pv is not None:
-            s["Above_PP"] = safe_round(pv["pct_closed_above_PP"], 3)
-            s["R1_fail"] = safe_round(pv["pct_failed_RR1"], 3)
-            s["R1_close"] = safe_round(pv["pct_closed_above_RR1"], 3)
-            s["S1_fail"] = safe_round(pv["pct_failed_bd_SS1"], 3)
-            s["S1_close"] = safe_round(pv["pct_closed_below_SS1"], 3)
+            desc["Above_PP"] = safe_round(pv["pct_closed_above_PP"], 3)
+            desc["R1_fail"] = safe_round(pv["pct_failed_RR1"], 3)
+            desc["R1_close"] = safe_round(pv["pct_closed_above_RR1"], 3)
+            desc["S1_fail"] = safe_round(pv["pct_failed_bd_SS1"], 3)
+            desc["S1_close"] = safe_round(pv["pct_closed_below_SS1"], 3)
         o = ofi_by_date.get(d)
         if o is not None:
-            s["OFI_ratio"] = safe_round(o["day_ofi_ratio"], 4)
-            s["OFI_30m_ratio"] = safe_round(o.get("ofi_ratio_30m"), 4)
-            s["VWAP_dev"] = safe_round(o["final_vwap_dev_pct"], 3)
-            s["intra_return"] = safe_round(o.get("intra_return_total"), 3)
-            s["OR_range"] = safe_round(o.get("or_range"), 2)
+            desc["OFI_ratio"] = safe_round(o["day_ofi_ratio"], 4)
+            desc["OFI_30m_ratio"] = safe_round(o.get("ofi_ratio_30m"), 4)
+            desc["VWAP_dev"] = safe_round(o["final_vwap_dev_pct"], 3)
+            desc["intra_return"] = safe_round(o.get("intra_return_total"), 3)
+            st_sig["OR_range"] = safe_round(o.get("or_range"), 2)
         g = gex_by_date.get(d)
         if g is not None:
-            s["Net_GEX_norm"] = safe_round(g.get("Net_GEX_norm"), 2)
-            s["Net_GEX_B"] = safe_round(g.get("Net_GEX_B"), 2)
-            s["Gamma_Tilt"] = safe_round(g.get("Gamma_Tilt"), 4)
-            s["Flip_Dist_pct"] = safe_round(g.get("Flip_Dist_pct"), 2)
-            s["Call_Wall"] = safe_round(g.get("Call_Wall"), 0)
-            s["Put_Wall"] = safe_round(g.get("Put_Wall"), 0)
-            s["Net_Sign"] = g.get("Net_Sign", "")
-            s["Spot_vs_Flip"] = g.get("Spot_vs_Flip", "")
+            st_sig["Net_GEX_norm"] = safe_round(g.get("Net_GEX_norm"), 2)
+            st_sig["Net_GEX_B"] = safe_round(g.get("Net_GEX_B"), 2)
+            st_sig["Gamma_Tilt"] = safe_round(g.get("Gamma_Tilt"), 4)
+            st_sig["Flip_Dist_pct"] = safe_round(g.get("Flip_Dist_pct"), 2)
+            st_sig["Call_Wall"] = safe_round(g.get("Call_Wall"), 0)
+            st_sig["Put_Wall"] = safe_round(g.get("Put_Wall"), 0)
+            st_sig["Net_Sign"] = g.get("Net_Sign", "")
+            st_sig["Spot_vs_Flip"] = g.get("Spot_vs_Flip", "")
             prev_g = gex_by_date.get(prev_date)
             if prev_g is not None:
                 pg_norm = prev_g.get("Net_GEX_norm")
                 cg_norm = g.get("Net_GEX_norm")
                 if pd.notna(pg_norm) and pd.notna(cg_norm):
-                    s["Net_GEX_norm_chg"] = safe_round(cg_norm - pg_norm, 2)
+                    st_sig["Net_GEX_norm_chg"] = safe_round(cg_norm - pg_norm, 2)
                     if (pg_norm <= 0 and cg_norm > 0):
-                        s["GEX_flip"] = "FLIPPED_POSITIVE"
+                        st_sig["GEX_flip"] = "FLIPPED_POSITIVE"
                     elif (pg_norm >= 0 and cg_norm < 0):
-                        s["GEX_flip"] = "FLIPPED_NEGATIVE"
+                        st_sig["GEX_flip"] = "FLIPPED_NEGATIVE"
                 pg_b = prev_g.get("Net_GEX_B")
                 cg_b = g.get("Net_GEX_B")
                 if pd.notna(pg_b) and pd.notna(cg_b):
-                    s["Net_GEX_B_chg"] = safe_round(cg_b - pg_b, 2)
+                    st_sig["Net_GEX_B_chg"] = safe_round(cg_b - pg_b, 2)
                 pg_tilt = prev_g.get("Gamma_Tilt")
                 cg_tilt = g.get("Gamma_Tilt")
                 if pd.notna(pg_tilt) and pd.notna(cg_tilt):
-                    s["Gamma_Tilt_chg"] = safe_round(cg_tilt - pg_tilt, 4)
+                    st_sig["Gamma_Tilt_chg"] = safe_round(cg_tilt - pg_tilt, 4)
                 pg_flip = prev_g.get("Flip_Dist_pct")
                 cg_flip = g.get("Flip_Dist_pct")
                 if pd.notna(pg_flip) and pd.notna(cg_flip):
-                    s["Flip_Dist_pct_chg"] = safe_round(cg_flip - pg_flip, 2)
+                    st_sig["Flip_Dist_pct_chg"] = safe_round(cg_flip - pg_flip, 2)
         sp = spy_by_date.get(d)
         if sp is not None:
-            s["SPY_close"] = safe_round(sp["close"], 2)
-            s["RSI_14"] = safe_round(sp["SPY_RSI_14"], 1)
-            s["EMA_8_20"] = safe_round(sp["SPY_EMA_8_20_var"], 4)
-            s["EMA_20_200"] = safe_round(sp["SPY_EMA_20_200_var"], 4)
-            s["CMF"] = safe_round(sp["SPY_Daily_CMF"], 3)
+            st_sig["SPY_close"] = safe_round(sp["close"], 2)
+            st_sig["RSI_14"] = safe_round(sp["SPY_RSI_14"], 1)
+            st_sig["EMA_8_20"] = safe_round(sp["SPY_EMA_8_20_var"], 4)
+            st_sig["EMA_20_200"] = safe_round(sp["SPY_EMA_20_200_var"], 4)
+            st_sig["CMF"] = safe_round(sp["SPY_Daily_CMF"], 3)
             rv20 = sp.get("SPY_realized_vol_20d")
             if pd.notna(rv20):
-                s["RealVol_20d"] = safe_round(rv20, 2)
+                st_sig["RealVol_20d"] = safe_round(rv20, 2)
                 v_row = vix_by_date.get(d)
                 if v_row is not None and v_row["VIX_Close"]:
-                    s["RealVol_VIX_ratio"] = safe_round(rv20 / v_row["VIX_Close"], 3)
+                    st_sig["RealVol_VIX_ratio"] = safe_round(rv20 / v_row["VIX_Close"], 3)
         # SP500 EMA breadth for this date
         ema_row = ema_breadth_df[ema_breadth_df["date"].dt.strftime("%Y-%m-%d") == d]
         if not ema_row.empty:
             r = ema_row.iloc[0]
-            s["pct_above_EMA5"] = safe_round(r.get("pct_above_EMA_5"), 3)
-            s["pct_above_EMA8"] = safe_round(r.get("pct_above_EMA_8"), 3)
-            s["pct_above_EMA20"] = safe_round(r.get("pct_above_EMA_20"), 3)
-            s["pct_above_EMA50"] = safe_round(r.get("pct_above_EMA_50"), 3)
-            s["pct_above_EMA200"] = safe_round(r.get("pct_above_EMA_200"), 3)
+            st_sig["pct_above_EMA5"] = safe_round(r.get("pct_above_EMA_5"), 3)
+            st_sig["pct_above_EMA8"] = safe_round(r.get("pct_above_EMA_8"), 3)
+            st_sig["pct_above_EMA20"] = safe_round(r.get("pct_above_EMA_20"), 3)
+            st_sig["pct_above_EMA50"] = safe_round(r.get("pct_above_EMA_50"), 3)
+            st_sig["pct_above_EMA200"] = safe_round(r.get("pct_above_EMA_200"), 3)
 
-        # Sector/commodity daily returns for this date
+        # Sector/commodity daily returns for this date (descriptive)
         etf_day = etf_df[etf_df["date"].dt.strftime("%Y-%m-%d") == d]
         if not etf_day.empty:
             cyclical_syms = ["XLK", "XLY", "XLF", "XLI", "XLB"]
             defensive_syms = ["XLU", "XLP", "XLV", "XLRE"]
-            # Compute 1-day returns relative to previous close
             etf_prev = etf_df[etf_df["date"] < pd.Timestamp(d)]
             if not etf_prev.empty:
                 prev_closes = etf_prev.groupby("symbol")["close"].last()
@@ -1111,25 +1124,23 @@ if page == "Market Overview":
                 day_returns = day_returns.dropna()
                 cyc_rets = [day_returns.get(sym, np.nan) for sym in cyclical_syms if sym in day_returns]
                 def_rets = [day_returns.get(sym, np.nan) for sym in defensive_syms if sym in day_returns]
-                s["Cyclical_avg_ret"] = safe_round(np.nanmean(cyc_rets), 2) if cyc_rets else None
-                s["Defensive_avg_ret"] = safe_round(np.nanmean(def_rets), 2) if def_rets else None
-                # Individual sector returns
+                desc["Cyclical_avg_ret"] = safe_round(np.nanmean(cyc_rets), 2) if cyc_rets else None
+                desc["Defensive_avg_ret"] = safe_round(np.nanmean(def_rets), 2) if def_rets else None
                 for sym in SECTOR_ETFS:
                     if sym in day_returns:
-                        s[f"{sym}_ret"] = safe_round(day_returns[sym], 2)
-                s["GLD_ret"] = safe_round(day_returns.get("GLD", np.nan), 2)
-                s["USO_ret"] = safe_round(day_returns.get("USO", np.nan), 2)
-                s["SLV_ret"] = safe_round(day_returns.get("SLV", np.nan), 2)
-                s["UNG_ret"] = safe_round(day_returns.get("UNG", np.nan), 2)
-                # Top/bottom sector
+                        desc[f"{sym}_ret"] = safe_round(day_returns[sym], 2)
+                desc["GLD_ret"] = safe_round(day_returns.get("GLD", np.nan), 2)
+                desc["USO_ret"] = safe_round(day_returns.get("USO", np.nan), 2)
+                desc["SLV_ret"] = safe_round(day_returns.get("SLV", np.nan), 2)
+                desc["UNG_ret"] = safe_round(day_returns.get("UNG", np.nan), 2)
                 sector_rets = {sym: day_returns.get(sym, np.nan) for sym in SECTOR_ETFS if sym in day_returns}
                 if sector_rets:
                     best = max(sector_rets, key=sector_rets.get)
                     worst = min(sector_rets, key=sector_rets.get)
-                    s["Best_sector"] = f"{best} ({sector_rets[best]:+.1f}%)"
-                    s["Worst_sector"] = f"{worst} ({sector_rets[worst]:+.1f}%)"
+                    desc["Best_sector"] = f"{best} ({sector_rets[best]:+.1f}%)"
+                    desc["Worst_sector"] = f"{worst} ({sector_rets[worst]:+.1f}%)"
 
-        trailing[d] = s
+        trailing[d] = {"state": st_sig, "descriptive": desc}
 
     # Compute recent RSI divergences (last 30 days) for AI context
     spy_recent = spy_df.tail(60).copy().reset_index(drop=True)
@@ -1151,8 +1162,53 @@ if page == "Market Overview":
     except Exception:
         divergence_summary = {"recent_bullish_divergences": [], "recent_bearish_divergences": []}
 
+    # 60-day context for key state signals (mean, sd, percentile)
+    def _pctile(series, val):
+        clean = series.dropna()
+        if len(clean) < 10 or pd.isna(val):
+            return None
+        return round(float((clean < val).sum()) / len(clean) * 100, 0)
+
+    ctx60 = {}
+    _ctx_specs = [
+        ("VIX", vix_df, "VIX_Close"),
+        ("COR1M", vix_df, "COR1M"),
+        ("RSI_14", spy_df, "SPY_RSI_14"),
+        ("CMF", spy_df, "SPY_Daily_CMF"),
+        ("EMA_8_20", spy_df, "SPY_EMA_8_20_var"),
+        ("EMA_20_200", spy_df, "SPY_EMA_20_200_var"),
+        ("PCR", pcr_df, "PCR"),
+        ("OR_range", ofi_df, "or_range"),
+        ("AD_z5", ad_df, "AD_z_score_5"),
+    ]
+    for label, df_src, col in _ctx_specs:
+        if col not in df_src.columns:
+            continue
+        tail60 = df_src[col].tail(60)
+        latest_val = tail60.iloc[-1] if len(tail60) else None
+        clean = tail60.dropna()
+        if len(clean) >= 10:
+            ctx60[label] = {
+                "mean_60d": safe_round(clean.mean(), 2),
+                "sd_60d": safe_round(clean.std(), 2),
+                "current": safe_round(latest_val, 2),
+                "percentile_60d": _pctile(clean, latest_val),
+            }
+
+    # SPY gap (pre-market tilt for fade-vs-breakout)
+    spy_gap_info = {}
+    spy_last, spy_prev = _get_spy_quote()
+    if spy_last and spy_prev and spy_prev > 0:
+        spy_gap_info["spy_gap_pct"] = round((spy_last / spy_prev - 1) * 100, 2)
+        spy_gap_info["spy_last"] = round(spy_last, 2)
+        spy_gap_info["spy_prev_close"] = round(spy_prev, 2)
+
     # Combine trailing signals + divergence info
     full_signals = {"trailing_5d": trailing, "rsi_divergences_30d": divergence_summary}
+    if ctx60:
+        full_signals["signal_context_60d"] = ctx60
+    if spy_gap_info:
+        full_signals["spy_gap"] = spy_gap_info
     # Include stale-spot context if GEX was computed from a frozen SPX cash index
     if stale_info["stale"]:
         spot_warning = {
