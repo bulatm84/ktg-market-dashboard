@@ -425,13 +425,13 @@ def check_scheduled_cache_clear():
 # Run on every page load
 check_scheduled_cache_clear()
 
-# --- One-time cache buster v15 (prompt: never expose field names like is_premarket) ---
-if "cache_cleared_v15" not in st.session_state:
+# --- One-time cache buster v16 (sector rotation analysis in AI prompts) ---
+if "cache_cleared_v16" not in st.session_state:
     for _f in CACHE_DIR.glob("regime_*.txt"):
         _f.unlink()
     for _f in CACHE_DIR.glob("strategies_*.txt"):
         _f.unlink()
-    st.session_state["cache_cleared_v15"] = True
+    st.session_state["cache_cleared_v16"] = True
 
 
 
@@ -508,6 +508,8 @@ Classify the current environment as one of:
 
 **NEUTRAL / NO CLEAR EDGE** — neither style has a strong edge. Low volatility, tight ranges, no clear trend or intraday opportunity. Reduce size and wait for clearer signals.
 
+IMPORTANT: Before calling NEUTRAL, check the `sector_analysis` block. If sector dispersion is wide (leaders +2% and laggards -2% over 5 days), there IS an edge even when the index looks flat — it's a sector-rotation market. Name the leading/lagging sectors and recommend sector-specific strategies rather than defaulting to neutral. Only call NEUTRAL when both the aggregate AND sector signals are flat.
+
 State which regime applies, explain WHY with specific state signal references, and note what would cause a SHIFT. Bold the regime classification.
 
 ---
@@ -523,6 +525,17 @@ Based on the regime summary above, recommend the specific stock strategy:
 If a **spy_gap** block is present and its is_premarket field is true, the gap percentage is the pre-market opening gap — the strongest open-knowable tilt for today. Gap-down days have ~9 pts higher R1 failure rate than gap-up days; use the gap direction to tilt fade vs breakout. If is_premarket is false, the price is an intraday reading, not the opening gap — silently ignore it for fade/breakout tilting. Never mention field names like "is_premarket" or "captured_at_et" in your output.
 
 Explain WHY with specific state signal references. Include entry/exit guidance.
+
+---
+
+## SECTOR ANALYSIS
+
+If a `sector_analysis` block is present, dedicate a paragraph to sector rotation:
+- Name the 2-3 leading and 2-3 lagging sectors using plain names (Technology, Financials, Energy, etc.)
+- State whether rotation favors cyclicals or defensives (or is neutral)
+- If dispersion is high (>3%), call out sector-pair trades or sector-specific setups (e.g., "long Technology / avoid Utilities")
+- Note any sector breakouts or breakdowns that are actionable today
+Do not repeat the full ranked list — pick out the story (what's rotating into favor, what's falling out).
 
 ---
 
@@ -577,6 +590,8 @@ NEVER use raw variable names or JSON field names in your output. Always translat
 - is_premarket / captured_at_et → never mention these; use them internally only
 - Adv_pct → "advance %" or "breadth"
 - AD_z5 → "breadth z-score"
+- rotation_signal / dispersion_5d → describe in plain English ("cyclicals outpacing defensives")
+- sector_5d_returns → use sector names, never tickers (say "Technology" not "XLK")
 Use actual values and numbers, described in terms any trader would understand.
 
 5-Day Trailing Market Signals:
@@ -727,9 +742,10 @@ LATEST-ROW OVERRIDE: If a state signal has reverted in the most recent row (move
 Analyze both the CURRENT state and the TRAJECTORY over the past 5 days. Specifically:
 
 1. **Regime classification** — What is the current market regime (risk-on, risk-off, transitional)? Base this on the persistent state signals: VIX level + z-score, COR1M, EMA 8/20 and 20/200 structure, RSI, CMF, GEX sign/flip distance, and EMA breadth. Has the regime SHIFTED over the past 5 days? If headlines provide context for WHY, explain the catalyst.
-2. **Expected range** — Is tomorrow's range likely to be wide or narrow? Use VIX, COR1M, OR range trend, and GEX sign as the honest read. Do NOT use pivot breadth failure rates for this.
-3. **Trajectory & momentum** — Are conditions improving, deteriorating, or stable? Reference the 60-day percentiles to anchor "elevated" or "depressed". Connect moves to macro catalysts where applicable.
-4. **Divergences & risks** — Any indicators moving in opposite directions? Any headline risks not yet reflected in the quantitative data?
+2. **Sector rotation & leadership** — If a `sector_analysis` block is present, analyze it: which sectors are leading/lagging over 5 days, whether money is flowing to cyclicals or defensives (the `rotation_signal`), and how wide the sector dispersion is. Name the top 2-3 leaders and laggards by their plain names (Technology, Financials, etc. — not ticker symbols). Sector rotation often reveals regime shifts BEFORE aggregate signals do — if cyclicals are breaking out while defensives lag, that's risk-on regardless of what the aggregate says. Conversely, if defensives lead and cyclicals break down, that's risk-off. High dispersion means there IS a trade even when the index looks flat.
+3. **Expected range** — Is tomorrow's range likely to be wide or narrow? Use VIX, COR1M, OR range trend, and GEX sign as the honest read. Do NOT use pivot breadth failure rates for this.
+4. **Trajectory & momentum** — Are conditions improving, deteriorating, or stable? Reference the 60-day percentiles to anchor "elevated" or "depressed". Connect moves to macro catalysts where applicable.
+5. **Divergences & risks** — Any indicators moving in opposite directions? Any headline risks not yet reflected in the quantitative data?
 
 If a **spy_gap** block is present and its is_premarket field is true, the gap percentage is the pre-market opening gap — the strongest open-knowable tilt for today's session direction. Mention the gap size and direction in plain language. If is_premarket is false, the price is an intraday reading — silently ignore it for session-direction calls. Never mention field names like "is_premarket" or "captured_at_et" in your output.
 
@@ -756,9 +772,11 @@ NEVER use raw variable names or JSON field names in your output. Always translat
 - is_premarket / captured_at_et → never mention these; use them internally only
 - Adv_pct → "advance %" or "breadth"
 - AD_z5 → "breadth z-score"
+- rotation_signal / dispersion_5d → describe in plain English ("cyclicals outpacing defensives")
+- sector_5d_returns → use sector names, never tickers (say "Technology" not "XLK")
 Use actual values and numbers, described in terms any trader would understand.
 
-Keep it concise (4-5 paragraphs). Use **bold** for key terms. Be direct and actionable.
+Keep it concise (5-6 paragraphs). Use **bold** for key terms. Be direct and actionable.
 
 5-Day Trailing Market Signals (oldest → newest):
 {signals_json}{headlines_section}"""
@@ -1210,12 +1228,56 @@ if page == "Market Overview":
         spy_gap_info["captured_at_et"] = et_now.strftime("%H:%M")
         spy_gap_info["is_premarket"] = et_now.hour < 9 or (et_now.hour == 9 and et_now.minute < 30)
 
+    # Sector rotation analysis (5-day cumulative returns from trailing data)
+    sector_analysis = {}
+    try:
+        trail_dates = sorted(trailing.keys())
+        if len(trail_dates) >= 2:
+            sector_5d = {}
+            for sym in SECTOR_ETFS:
+                key = f"{sym}_ret"
+                rets = [trailing[d]["descriptive"].get(key) for d in trail_dates]
+                rets = [r for r in rets if r is not None]
+                if rets:
+                    sector_5d[sym] = round(sum(rets), 2)
+            if sector_5d:
+                ranked = sorted(sector_5d.items(), key=lambda x: x[1], reverse=True)
+                sector_analysis["sector_5d_returns"] = {
+                    sym: {"label": SECTOR_ETFS[sym], "return_5d": ret} for sym, ret in ranked
+                }
+                sector_analysis["leaders"] = [
+                    f"{SECTOR_ETFS[s]} ({r:+.1f}%)" for s, r in ranked[:3]
+                ]
+                sector_analysis["laggards"] = [
+                    f"{SECTOR_ETFS[s]} ({r:+.1f}%)" for s, r in ranked[-3:]
+                ]
+                cyc_syms = ["XLK", "XLY", "XLF", "XLI", "XLB"]
+                def_syms = ["XLU", "XLP", "XLV", "XLRE"]
+                cyc_5d = [sector_5d[s] for s in cyc_syms if s in sector_5d]
+                def_5d = [sector_5d[s] for s in def_syms if s in sector_5d]
+                if cyc_5d and def_5d:
+                    cyc_avg = round(np.nanmean(cyc_5d), 2)
+                    def_avg = round(np.nanmean(def_5d), 2)
+                    sector_analysis["cyclical_5d_avg"] = cyc_avg
+                    sector_analysis["defensive_5d_avg"] = def_avg
+                    sector_analysis["rotation_signal"] = (
+                        "risk-on" if cyc_avg > def_avg + 0.5 else
+                        "risk-off" if def_avg > cyc_avg + 0.5 else
+                        "neutral"
+                    )
+                spread = ranked[0][1] - ranked[-1][1]
+                sector_analysis["dispersion_5d"] = round(spread, 2)
+    except Exception:
+        pass
+
     # Combine trailing signals + divergence info
     full_signals = {"trailing_5d": trailing, "rsi_divergences_30d": divergence_summary}
     if ctx60:
         full_signals["signal_context_60d"] = ctx60
     if spy_gap_info:
         full_signals["spy_gap"] = spy_gap_info
+    if sector_analysis:
+        full_signals["sector_analysis"] = sector_analysis
     # Include stale-spot context if GEX was computed from a frozen SPX cash index
     if stale_info["stale"]:
         spot_warning = {
